@@ -26,10 +26,18 @@ const withPrice = (row) => ({ ...row, price: priceBreakdown(row.fee_paise) });
 r.get('/meta', ah(async (_req, res) => {
   const [cities, specs, langs] = await Promise.all([
     query('SELECT slug, name, state, lat, lng, is_live FROM cities ORDER BY is_live DESC, name'),
-    query('SELECT slug, name FROM specializations ORDER BY name'),
+    query(`SELECT s.slug, s.name, count(lp.user_id)::int AS lawyer_count
+             FROM specializations s
+             LEFT JOIN lawyer_specializations ls ON ls.specialization_id = s.id
+             LEFT JOIN lawyer_profiles lp ON lp.user_id = ls.lawyer_id AND lp.verification_status = 'verified'
+            GROUP BY s.id ORDER BY s.name`),
     query(`SELECT DISTINCT unnest(languages) AS l FROM lawyer_profiles WHERE verification_status = 'verified' ORDER BY 1`),
   ]);
+  const { rows: [counts] } = await query(
+    `SELECT (SELECT count(*) FROM lawyer_profiles WHERE verification_status = 'verified')::int AS lawyers,
+            (SELECT count(DISTINCT area) FROM lawyer_profiles WHERE verification_status = 'verified')::int AS areas`);
   res.json({
+    counts,
     cities: cities.rows,
     specializations: specs.rows,
     languages: langs.rows.map((r) => r.l),
