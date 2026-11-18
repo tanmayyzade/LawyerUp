@@ -1,0 +1,16 @@
+# Optional: run PostgreSQL in Docker instead of installing it.
+#   docker compose up -d
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lawyerup
+      POSTGRES_PASSWORD: lawyerup
+      POSTGRES_DB: lawyerup
+    ports: ["5432:5432"]
+    volumes:
+      - lawyerup-pg:/var/lib/postgresql/data
+      - ./scripts/docker-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+volumes:
+  lawyerup-pg:

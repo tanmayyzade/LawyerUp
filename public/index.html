@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LawyerUp — Find a lawyer, compare fees, book a consultation</title>
+  <meta name="description" content="Find verified lawyers near you, compare consultation fees and book a video, phone or in-person consultation." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="demo-banner" role="note">
+    Development build · sample Mumbai data · payments, OTP and identity checks are simulated.
+    Don't enter Aadhaar numbers or confidential case details.
+  </div>
+  <header class="topbar">
+    <a href="#/" class="brand" aria-label="LawyerUp home"><span class="brand-mark">L</span>LawyerUp</a>
+    <button class="menu-toggle" aria-label="Menu" aria-expanded="false">☰</button>
+    <nav id="nav" class="nav"></nav>
+  </header>
+  <main id="app" tabindex="-1"></main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <footer class="footer">
+    <span>© LawyerUp · Milestone 1</span>
+    <span>Information on this site is not legal advice. Consult a qualified advocate.</span>
+  </footer>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
