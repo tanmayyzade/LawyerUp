@@ -3,6 +3,7 @@
 import { pool, tx } from './pool.js';
 import { config } from '../config.js';
 import { hashPassword } from '../lib/security.js';
+import { istToDate, dateToIst } from '../lib/time.js';
 
 export const DEMO_PASSWORD = 'Demo@1234';
 
@@ -78,6 +79,70 @@ const REVIEW_TEXT = [
   [5, 'Calm and reassuring, answered every question.'],
   [4, 'Solid guidance in simple language.'],
 ];
+
+async function seedDemoLawyerWeek(db, L, clientIds) {
+  const now = Date.now();
+  // Offsets count working days (Mon–Fri) from today, matching this lawyer's weekday hours.
+  const day = (offset) => {
+    let d = new Date(now); const step = offset < 0 ? -1 : 1; let left = Math.abs(offset);
+    const isWeekday = (x) => { const w = dateToIst(x).weekday; return w >= 1 && w <= 5; };
+    if (offset === 0) return dateToIst(d).day;   // today, whatever day it is
+    while (left > 0) { d = new Date(d.getTime() + step * 86_400_000); if (isWeekday(d)) left -= 1; }
+    return dateToIst(d).day;
+  };
+  const platform = (fee) => Math.round(fee * config.platformFeeBps / 10_000);
+  const topics = [
+    'Builder has delayed possession by two years', 'Society refusing NOC for flat sale', 'Tenant not vacating after notice',
+    'Partition of ancestral flat in Dadar', 'Help drafting a RERA complaint', 'Title check before buying a flat',
+    'Leave and licence agreement review', 'Redevelopment offer from builder', 'Encroachment by neighbour',
+  ];
+  const plan = [
+    // [dayOffset, time, clientIdx, mode, status]
+    [0, '10:00', 1, 'video', 'completed'], [0, '11:30', 2, 'phone', 'confirmed'], [0, '15:00', 0, 'video', 'confirmed'],
+    [0, '16:30', 3, 'in_person', 'confirmed'],
+    [1, '10:30', 4, 'video', 'confirmed'], [1, '15:30', 5, 'phone', 'confirmed'],
+    [2, '12:00', 1, 'in_person', 'confirmed'],
+    [3, '10:00', 2, 'video', 'confirmed'], [3, '11:00', 3, 'video', 'confirmed'], [3, '17:00', 4, 'phone', 'confirmed'],
+    [5, '11:30', 5, 'video', 'confirmed'],
+    [-1, '15:00', 4, 'video', 'confirmed'],         // yesterday, not yet marked complete
+    [-2, '11:00', 2, 'phone', 'completed'], [-3, '16:00', 3, 'video', 'completed'],
+    [-4, '10:30', 5, 'video', 'late_cancel'], [2, '17:00', 2, 'phone', 'client_cancel'],
+  ];
+  const ids = [];
+  for (const [i, [off, time, ci, mode, kind]] of plan.entries()) {
+    const start = istToDate(day(off), time);
+    const end = new Date(start.getTime() + L.mins * 60_000);
+    const status = kind === 'late_cancel' || kind === 'client_cancel' ? 'cancelled' : kind;
+    const fee = L.fee; const pf = platform(fee); const total = fee + pf;
+    const { rows: [b] } = await db.query(
+      `INSERT INTO bookings (client_id, lawyer_id, starts_at, ends_at, mode, status, fee_paise, platform_fee_paise, total_paise,
+                             issue_summary, meeting_url, completed_at, cancelled_by, cancel_reason, cancelled_at, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$3::timestamptz - interval '3 days') RETURNING id`,
+      [clientIds[ci], L.id, start, end, mode, status, fee, pf, total, topics[i % topics.length],
+        mode === 'video' && status === 'confirmed' ? `https://meet.jit.si/LawyerUp-demo-${i}${L.id.slice(0, 6)}` : null,
+        status === 'completed' ? end : null,
+        status === 'cancelled' ? clientIds[ci] : null,
+        kind === 'late_cancel' ? 'Matter settled with the builder' : kind === 'client_cancel' ? 'Need to reschedule' : null,
+        status === 'cancelled' ? new Date(start.getTime() - (kind === 'late_cancel' ? 2 : 30) * 3_600_000) : null]);
+    const refunded = kind === 'late_cancel' ? Math.round(total / 2) : kind === 'client_cancel' ? total : 0;
+    await db.query(
+      `INSERT INTO payments (booking_id, provider, provider_order_id, provider_payment_id, amount_paise, refunded_paise, status)
+       VALUES ($1,'mock',$2,$3,$4,$5,$6)`,
+      [b.id, `seed_week_order_${i}`, `seed_week_pay_${i}`, total, refunded, refunded ? 'refunded' : 'captured']);
+    ids.push({ id: b.id, client: clientIds[ci], status, off });
+  }
+  // Messages: a few client questions, one already answered.
+  const msg = (bid, sender, body, minsAgo) => db.query(
+    `INSERT INTO messages (booking_id, sender_id, body, created_at) VALUES ($1,$2,$3, now() - make_interval(mins => $4))`, [bid, sender, body, minsAgo]);
+  await msg(ids[2].id, ids[2].client, 'Hi, should I keep the builder agreement and payment receipts ready for the call?', 180);
+  await msg(ids[2].id, L.id, 'Yes please, the agreement for sale and the last two demand letters are enough for now.', 150);
+  await msg(ids[2].id, ids[2].client, 'Thank you. Will the call be in English or Hindi?', 40);
+  await msg(ids[4].id, ids[4].client, 'Is it possible to start 10 minutes late tomorrow?', 25);
+  await msg(ids[6].id, ids[6].client, 'Your office is near the Fort post office, right?', 90);
+  // A private note from the lawyer.
+  await db.query(`UPDATE bookings SET lawyer_notes = $2 WHERE id = $1`, [ids[0].id,
+    'Possession delayed since 2023. Client has agreement and payment receipts. Next step: send legal notice, then RERA complaint if no reply in 15 days.']);
+}
 
 const slugify = (s) => s.toLowerCase().replace(/[^a-z]+/g, '.').replace(/^\.|\.$/g, '');
 
@@ -161,6 +226,9 @@ export async function seed({ log = console.log } = {}) {
     await db.query(`UPDATE lawyer_profiles lp SET rating_count = s.n, rating_avg = s.avg
                       FROM (SELECT lawyer_id, count(*) n, round(avg(rating)::numeric, 2) avg FROM reviews GROUP BY lawyer_id) s
                      WHERE s.lawyer_id = lp.user_id`);
+
+    // A realistic week for the demo lawyer (lawyer@lawyerup.dev), so the practice portal has something to show.
+    await seedDemoLawyerWeek(db, lawyerIds[0], clientIds);
 
     // One lawyer awaiting verification, for the admin queue.
     const pendingId = (await db.query(

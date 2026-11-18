@@ -44,10 +44,11 @@ test('a client cannot hold two consultations at the same time', async () => {
   const c = await newClient('Double Booker');
   // Find an overlapping slot with the other lawyer
   await bookAndPay(c, otherLawyerId, slot);
-  const overlapping = (await request(app).get(`/api/lawyers/${lawyerId}/slots?date=${new Date(new Date(slot.startsAt).getTime() + 330 * 60000).toISOString().slice(0, 10)}`))
+  const thirdLawyer = await lawyerByEmail('adv.meera.kulkarni@lawyerup.dev');   // same weekday hours as Rohan Mehta
+  const overlapping = (await request(app).get(`/api/lawyers/${thirdLawyer}/slots?date=${new Date(new Date(slot.startsAt).getTime() + 330 * 60000).toISOString().slice(0, 10)}`))
     .body.slots.find((s) => s.available && s.startsAt < slot.endsAt && s.endsAt > slot.startsAt);
   assert.ok(overlapping, 'expected an overlapping slot with the second lawyer');
-  const res = await c.post('/api/bookings').send({ lawyerId, startsAt: overlapping.startsAt, mode: 'video' });
+  const res = await c.post('/api/bookings').send({ lawyerId: thirdLawyer, startsAt: overlapping.startsAt, mode: 'video' });
   assert.equal(res.status, 409);
   assert.equal(res.body.error.code, 'client_overlap');
 });

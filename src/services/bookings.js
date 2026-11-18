@@ -42,6 +42,17 @@ export async function getBookingFor(user, bookingId, db = { query }) {
   if (!allowed) throw notFound('Booking not found.');   // don't reveal existence
   // Meeting link only for confirmed participants.
   if (b.status !== 'confirmed') b.meeting_url = null;
+  // Lawyer-only context: private notes, client contact (once confirmed) and history with this client.
+  if (user.id === b.lawyer_id) {
+    const { rows: [x] } = await db.query(
+      `SELECT bk.lawyer_notes,
+              CASE WHEN bk.status IN ('confirmed','completed') THEN u.phone END AS client_phone,
+              CASE WHEN bk.status IN ('confirmed','completed') THEN u.email END AS client_email,
+              (SELECT count(*)::int FROM bookings o WHERE o.lawyer_id = bk.lawyer_id AND o.client_id = bk.client_id
+                  AND o.status = 'completed' AND o.id <> bk.id) AS previous_consultations
+         FROM bookings bk JOIN users u ON u.id = bk.client_id WHERE bk.id = $1`, [b.id]);
+    Object.assign(b, x);
+  }
   return b;
 }
 

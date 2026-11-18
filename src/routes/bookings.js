@@ -86,6 +86,11 @@ r.get('/:id/messages', ah(async (req, res) => {
     `SELECT m.id, m.sender_id, u.name AS sender_name, m.body, m.created_at
        FROM messages m JOIN users u ON u.id = m.sender_id
       WHERE m.booking_id = $1 AND m.id > $2 ORDER BY m.id LIMIT 500`, [b.id, after]);
+  if (rows.length) {
+    await query(`INSERT INTO message_reads (booking_id, user_id, last_read_id) VALUES ($1,$2,$3)
+                 ON CONFLICT (booking_id, user_id) DO UPDATE SET last_read_id = GREATEST(message_reads.last_read_id, EXCLUDED.last_read_id), updated_at = now()`,
+      [b.id, req.user.id, rows[rows.length - 1].id]);
+  }
   res.json({ messages: rows });
 }));
 
@@ -96,6 +101,15 @@ r.post('/:id/messages', ah(async (req, res) => {
     `INSERT INTO messages (booking_id, sender_id, body) VALUES ($1,$2,$3) RETURNING id, sender_id, body, created_at`,
     [b.id, req.user.id, body]);
   res.status(201).json({ message: { ...m, sender_name: req.user.name } });
+}));
+
+// ---------------------------------------------------------------- lawyer's private notes
+r.put('/:id/notes', requireRole('lawyer'), ah(async (req, res) => {
+  const id = loadId(req);
+  const notes = v.str(req.body?.notes ?? '', 'Notes', { min: 0, max: 5000, optional: true });
+  const { rowCount } = await query('UPDATE bookings SET lawyer_notes = $3, updated_at = now() WHERE id = $1 AND lawyer_id = $2', [id, req.user.id, notes]);
+  if (!rowCount) throw notFound('Booking not found.');
+  res.json({ ok: true });
 }));
 
 // ---------------------------------------------------------------- reviews

@@ -10,6 +10,7 @@ import publicRoutes from './routes/public.js';
 import bookingRoutes from './routes/bookings.js';
 import paymentRoutes, { razorpayWebhook } from './routes/payments.js';
 import { lawyer as lawyerRoutes, admin as adminRoutes } from './routes/workspace.js';
+import practiceRoutes from './routes/practice.js';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../public');
 
@@ -61,6 +62,7 @@ export function createApp() {
   app.use('/api/bookings', bookingRoutes);
   app.use('/api/payments', paymentRoutes);
   app.use('/api/lawyer', lawyerRoutes);
+  app.use('/api/lawyer', practiceRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found.', 'not_found')));
 
