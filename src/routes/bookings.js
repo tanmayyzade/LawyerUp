@@ -7,9 +7,10 @@ import { requireAuth, requireRole } from '../lib/auth.js';
 import * as v from '../lib/validate.js';
 import { audit } from '../lib/audit.js';
 import {
-  BOOKING_COLUMNS, BOOKING_FROM, createBooking, getBookingFor, cancelBooking, completeBooking, retryPayment,
+  BOOKING_COLUMNS, BOOKING_FROM, createBooking, getBookingFor, cancelBooking, completeBooking, retryPayment, rescheduleBooking,
 } from '../services/bookings.js';
 import { expireStaleHolds } from '../services/availability.js';
+import { bookingIcs } from '../lib/ics.js';
 
 const r = Router();
 r.use(requireAuth);
@@ -63,6 +64,24 @@ r.post('/:id/payment-order', requireRole('client'), ah(async (req, res) => {
 r.post('/:id/cancel', ah(async (req, res) => {
   const reason = v.str(req.body?.reason, 'Reason', { max: 300, optional: true });
   res.json(await cancelBooking(req.user, loadId(req), reason));
+}));
+
+r.post('/:id/reschedule', ah(async (req, res) => {
+  const id = loadId(req);
+  if (req.user.role === 'admin') throw forbidden('Admins cannot reschedule consultations.');
+  const startsAt = new Date(req.body?.startsAt);
+  if (Number.isNaN(startsAt.getTime())) throw badRequest('Choose a new time.');
+  res.json(await rescheduleBooking(req.user, id, startsAt));
+}));
+
+// Calendar file with 24 h and 15 min reminders. Re-download after a reschedule to update the event.
+r.get('/:id/calendar.ics', ah(async (req, res) => {
+  const b = await getBookingFor(req.user, loadId(req));
+  if (b.status !== 'confirmed') throw conflict('Calendar invites are available for confirmed consultations.', 'not_confirmed');
+  const viewer = b.lawyer_id === req.user.id ? 'lawyer' : 'client';
+  const site = `${req.protocol}://${req.get('host')}`;
+  res.set({ 'Content-Type': 'text/calendar; charset=utf-8', 'Content-Disposition': `attachment; filename="lawyerup-${b.id.slice(0, 8)}.ics"`, 'Cache-Control': 'no-store' });
+  res.send(bookingIcs(b, viewer, site));
 }));
 
 r.post('/:id/complete', requireRole('lawyer', 'admin'), ah(async (req, res) => {

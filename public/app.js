@@ -617,7 +617,7 @@ async function viewBooking({ path }) {
         <div class="card">
           <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
             <div><h1 style="margin-bottom:4px">${isLawyer ? b.client_name : b.lawyer_name}</h1>
-              <div class="muted">${fmtDateTime(b.starts_at)} – ${fmtTime(b.ends_at)} IST · ${MODE[b.mode]}</div></div>
+              <div class="muted">${fmtDateTime(b.starts_at)} – ${fmtTime(b.ends_at)} IST · ${MODE[b.mode]}${b.reschedule_count ? ' · Rescheduled' : ''}</div></div>
             ${raw(statusPill(b.status))}
           </div>
           ${raw(b.issue_summary ? h`<p style="margin-top:12px"><b>Topic:</b> ${b.issue_summary}</p>` : '')}
@@ -641,6 +641,12 @@ async function viewBooking({ path }) {
           <tr class="total"><td>Total</td><td>${rupees(b.total_paise)}</td></tr>`)}
         </table>
         ${raw(b.payment ? h`<p class="small muted" style="margin-top:8px">Status: <b>${b.payment.status}</b>${b.payment.refunded_paise ? ` · refunded ${rupees(b.payment.refunded_paise)}` : ''}</p>` : '')}
+        ${raw(b.status === 'confirmed' && !started ? (() => { const rs = canReschedule(b, me); return h`<div class="divider"></div>
+          <div class="stack" style="--gap:8px">
+            ${raw(rs.ok ? '<button class="btn ghost block" id="reschedule">Reschedule</button>' : '')}
+            <a class="btn ghost block" href="${calendarLink(b)}" download>Add to calendar</a>
+          </div>
+          <p class="micro muted" style="margin:8px 0 0">${rs.ok ? (rs.left !== undefined ? `You can move this booking ${rs.left} more ${rs.left === 1 ? 'time' : 'times'}, up to ${state.meta.freeCancelHours} hours before it starts.` : '') : rs.why || ''} The invite includes reminders a day and 15 minutes before.</p>`; })() : '')}
         ${raw(canCancel ? h`<div class="divider"></div>
           <p class="small muted">${isLawyer ? 'Cancelling refunds the client in full.' : lateCancel ? `Less than ${state.meta.freeCancelHours} hours to go: cancelling now refunds 50%.` : 'Free cancellation — you\'ll get a full refund.'}</p>
           <button class="btn danger block" id="cancel">Cancel consultation</button>` : '')}
@@ -648,6 +654,7 @@ async function viewBooking({ path }) {
       </aside>
     </div>`;
 
+  $('#reschedule')?.addEventListener('click', () => openReschedule(b, render));
   $('#cancel')?.addEventListener('click', async () => {
     const reason = prompt('Reason for cancelling (optional):');
     if (reason === null) return;
@@ -689,6 +696,73 @@ async function viewBooking({ path }) {
     });
     $('#chat textarea').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#chat').requestSubmit(); } });
   }
+}
+
+// ------------------------------------------------------------------ reschedule & calendar
+const calendarLink = (b) => `/api/bookings/${b.id}/calendar.ics`;
+
+function canReschedule(b, me) {
+  if (b.status !== 'confirmed' || new Date(b.starts_at) <= new Date()) return { ok: false };
+  if (b.lawyer_id === me.id) return { ok: true };
+  const hours = (new Date(b.starts_at) - Date.now()) / 3_600_000;
+  if (hours < state.meta.freeCancelHours) return { ok: false, why: `Rescheduling closes ${state.meta.freeCancelHours} hours before the start.` };
+  if ((b.reschedule_count || 0) >= 2) return { ok: false, why: 'This booking has already been moved twice. Message your lawyer to arrange another change.' };
+  return { ok: true, left: 2 - (b.reschedule_count || 0) };
+}
+
+/** Glass sheet with a day strip and open slots; resolves after a successful move. */
+function openReschedule(b, onDone) {
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet-backdrop';
+  sheet.innerHTML = h`<div class="sheet glass" role="dialog" aria-modal="true" aria-labelledby="rs-title">
+    <div class="sheet-head"><div><h2 id="rs-title">Pick a new time</h2>
+      <p class="small muted" style="margin:0">Currently ${fmtDateTime(b.starts_at)}. The fee you paid carries over.</p></div>
+      <button class="sheet-close" aria-label="Close">×</button></div>
+    <div class="days" id="rs-days"></div>
+    <div id="rs-slots"><div class="spinner"></div></div>
+    <div class="sheet-foot"><span class="small muted" id="rs-pick">No time selected</span><button class="btn" id="rs-go" disabled>Move consultation</button></div>
+  </div>`;
+  document.body.append(sheet);
+  const close = () => { sheet.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  sheet.addEventListener('click', (e) => { if (e.target === sheet || e.target.closest('.sheet-close')) close(); });
+
+  let pick = null;
+  const days = [...Array(14)].map((_, i) => istDay(Date.now() + i * 86_400_000));
+  $('#rs-days', sheet).innerHTML = days.map((d) => {
+    const dt = new Date(`${d}T12:00:00+05:30`);
+    return h`<button type="button" class="day" data-day="${d}"><small>${fmt(dt, { weekday: 'short' })}</small><b>${fmt(dt, { day: 'numeric' })}</b><small>${fmt(dt, { month: 'short' })}</small></button>`;
+  }).join('');
+  const load = async (day) => {
+    $$('#rs-days .day', sheet).forEach((x) => x.classList.toggle('on', x.dataset.day === day));
+    $('#rs-slots', sheet).innerHTML = '<div class="spinner"></div>';
+    const { slots } = await api(`/lawyers/${b.lawyer_id}/slots?date=${day}`);
+    const open = slots.filter((s) => s.startsAt !== new Date(b.starts_at).toISOString());
+    $('#rs-slots', sheet).innerHTML = open.length
+      ? h`<div class="slots">${open.map((s) => raw(h`<button type="button" class="slot" data-start="${s.startsAt}" ${s.available ? '' : 'disabled'}>${fmtTime(s.startsAt)}</button>`))}</div>`
+      : '<p class="small muted" style="margin-top:12px">No hours on this day.</p>';
+    $$('#rs-slots .slot', sheet).forEach((btn) => btn.addEventListener('click', () => {
+      pick = btn.dataset.start;
+      $$('#rs-slots .slot', sheet).forEach((x) => x.classList.toggle('on', x === btn));
+      $('#rs-pick', sheet).textContent = `New time: ${fmtDateTime(pick)}`;
+      $('#rs-go', sheet).disabled = false;
+    }));
+  };
+  $$('#rs-days .day', sheet).forEach((x) => x.addEventListener('click', () => { pick = null; $('#rs-go', sheet).disabled = true; load(x.dataset.day); }));
+  load(istDay(b.starts_at) >= days[0] ? istDay(b.starts_at) : days[0]);
+
+  $('#rs-go', sheet).addEventListener('click', async () => {
+    const go = $('#rs-go', sheet); go.disabled = true; go.textContent = 'Moving…';
+    try {
+      await api(`/bookings/${b.id}/reschedule`, { method: 'POST', body: { startsAt: pick } });
+      close(); toast(`Moved to ${fmtDateTime(pick)}. Download the calendar invite again to update your calendar.`);
+      onDone?.();
+    } catch (e) {
+      fail(e); go.textContent = 'Move consultation';
+      if (e.code === 'slot_taken') { pick = null; load(istDay(Date.now())); } else go.disabled = false;
+    }
+  });
 }
 
 // ------------------------------------------------------------------ auth
@@ -1276,10 +1350,11 @@ async function viewLawyerBooking(b) {
         <section class="card glass booking-hero">
           <div class="next-label">${b.status === 'confirmed' ? relTime(b.starts_at, b.ends_at) : STATUS[b.status][0]}</div>
           <h2 style="margin:4px 0 2px">${fmtDateTime(b.starts_at)} to ${fmtTime(b.ends_at)}</h2>
-          <div class="muted">${MODE[b.mode]}${b.mode === 'in_person' ? `, ${b.office_address || b.lawyer_area}` : ''}</div>
+          <div class="muted">${MODE[b.mode]}${b.mode === 'in_person' ? `, ${b.office_address || b.lawyer_area}` : ''}${b.reschedule_count ? `. Rescheduled ${b.reschedule_count === 1 ? 'once' : `${b.reschedule_count} times`}` : ''}</div>
           ${raw(b.issue_summary ? h`<p class="next-topic">${b.issue_summary}</p>` : '')}
           <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
             ${raw(joinAction(b))}
+            ${raw(b.status === 'confirmed' && !started ? h`<button class="btn ghost" id="reschedule">Reschedule</button><a class="btn ghost" href="${calendarLink(b)}" download>Add to calendar</a>` : '')}
             ${raw(b.status === 'confirmed' && started ? '<button class="btn" id="complete">Mark as complete</button>' : '')}
             ${raw(canCancel ? '<button class="btn danger" id="cancel">Cancel consultation</button>' : '')}
           </div>
@@ -1322,6 +1397,7 @@ async function viewLawyerBooking(b) {
   notes.addEventListener('input', () => { st.textContent = 'Saving…'; clearTimeout(saveTimer); saveTimer = setTimeout(saveNotes, 800); });
   notes.addEventListener('blur', () => { if (st.textContent === 'Saving…') { clearTimeout(saveTimer); saveNotes(); } });
 
+  $('#reschedule')?.addEventListener('click', () => openReschedule(b, () => { refreshStats(); render(); }));
   $('#complete')?.addEventListener('click', async () => {
     try { await api(`/bookings/${b.id}/complete`, { method: 'POST' }); toast('Marked as complete.'); refreshStats(); render(); } catch (e) { fail(e); }
   });

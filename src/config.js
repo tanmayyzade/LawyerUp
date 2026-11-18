@@ -30,6 +30,7 @@ export const config = {
   platformFeeBps: Number(env.PLATFORM_FEE_BPS || 1000),         // 1000 bps = 10%
   bookingHoldMinutes: Number(env.BOOKING_HOLD_MINUTES || 10),    // slot held while client pays
   freeCancelHours: Number(env.FREE_CANCEL_HOURS || 4),           // full refund if client cancels this early
+  maxClientReschedules: Number(env.MAX_CLIENT_RESCHEDULES || 2),  // per booking; lawyers aren't limited
   minLeadMinutes: Number(env.MIN_LEAD_MINUTES || 60),            // earliest bookable slot from now
   bookingHorizonDays: Number(env.BOOKING_HORIZON_DAYS || 30),
   tzOffsetMinutes: 330,                                          // IST (+05:30, no DST) — whole of India

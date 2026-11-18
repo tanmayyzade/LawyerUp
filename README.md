@@ -61,6 +61,8 @@ pending_payment ──(payment captured)──▶ confirmed ──(lawyer marks 
       └─(cancel)──▶ cancelled                    confirmed ──(cancel)──▶ cancelled + refund
 ```
 
+**Rescheduling:** the client or the lawyer can move a confirmed consultation to another open slot. The move happens in one transaction, with no refund and no new payment, and the database still prevents overlaps. A client can do this up to 2 times (`MAX_CLIENT_RESCHEDULES`) and only up to 4 hours before the start; a lawyer can do it any time before the start. Each booking can also be downloaded as an `.ics` calendar invite with reminders 24 hours and 15 minutes before.
+
 **Refund policy:** if the client cancels at least `FREE_CANCEL_HOURS` (4) hours before the start, they get 100% back. Later than that, they get 50%. If the lawyer cancels, the client always gets 100%.
 **Fees:** lawyer fee + `PLATFORM_FEE_BPS` (10%) service fee, charged as one order. All amounts are stored in paise.
 

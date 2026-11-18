@@ -22,6 +22,7 @@ export const BOOKING_COLUMNS = `
   b.id, b.client_id, b.lawyer_id, b.starts_at, b.ends_at, b.mode, b.status,
   b.fee_paise, b.platform_fee_paise, b.total_paise, b.issue_summary, b.meeting_url,
   b.hold_expires_at, b.cancel_reason, b.cancelled_at, b.completed_at, b.created_at,
+  b.reschedule_count, b.rescheduled_at,
   cu.name AS client_name, lu.name AS lawyer_name, lp.area AS lawyer_area, lp.office_address,
   lp.photo_url AS lawyer_photo,
   (SELECT row_to_json(p) FROM (
@@ -178,6 +179,52 @@ export async function completeBooking(user, bookingId) {
     await audit(db, user.id, 'booking.completed', 'booking', b.id);
   });
   return getBookingFor(user, bookingId);
+}
+
+/**
+ * Move a confirmed booking to another published slot of the same lawyer, in one transaction.
+ * No refund or new payment: the fee already paid carries over. The GiST exclusion constraints
+ * still guarantee the new time can't overlap another live booking for the lawyer or the client.
+ */
+export async function rescheduleBooking(user, bookingId, newStart, { now = new Date() } = {}) {
+  const result = await tx(async (db) => {
+    const { rows: [b] } = await db.query('SELECT * FROM bookings WHERE id = $1 FOR UPDATE', [bookingId]);
+    const role = b && (b.client_id === user.id ? 'client' : b.lawyer_id === user.id ? 'lawyer' : null);
+    if (!role) throw notFound('Booking not found.');
+    if (b.status !== 'confirmed') throw conflict('Only confirmed consultations can be rescheduled.', 'not_reschedulable');
+    if (new Date(b.starts_at) <= now) throw conflict('This consultation has already started.', 'not_reschedulable');
+    if (role === 'client') {
+      const hoursBefore = (new Date(b.starts_at) - now) / 3_600_000;
+      if (hoursBefore < config.freeCancelHours) {
+        throw conflict(`Rescheduling closes ${config.freeCancelHours} hours before the start. Message your lawyer, or cancel under the refund policy.`, 'reschedule_too_late');
+      }
+      if (b.reschedule_count >= config.maxClientReschedules) {
+        throw conflict(`This booking has already been moved ${b.reschedule_count} times. Message your lawyer to arrange another change.`, 'reschedule_limit');
+      }
+    }
+    if (newStart.getTime() === new Date(b.starts_at).getTime()) throw badRequest('Choose a different time.');
+
+    const slot = await isPublishedSlot(db, b.lawyer_id, newStart, { now });
+    if (!slot.ok) throw badRequest('That time is not one of the lawyer\'s available slots.');
+    // Keep the paid session length even if the lawyer has since changed theirs.
+    const newEnd = new Date(newStart.getTime() + (new Date(b.ends_at) - new Date(b.starts_at)));
+
+    await db.query('SAVEPOINT move');
+    try {
+      await db.query(`UPDATE bookings SET starts_at = $2, ends_at = $3, reschedule_count = reschedule_count + 1,
+                             rescheduled_at = now(), updated_at = now() WHERE id = $1`, [b.id, newStart, newEnd]);
+    } catch (err) {
+      await db.query('ROLLBACK TO SAVEPOINT move');
+      throw mapOverlapError(err);
+    }
+    const fmt = (d) => new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).format(d);
+    // Leave a note in the conversation so the other side sees the change.
+    await db.query('INSERT INTO messages (booking_id, sender_id, body) VALUES ($1,$2,$3)', [b.id, user.id,
+      `Rescheduled from ${fmt(new Date(b.starts_at))} to ${fmt(newStart)} IST.`]);
+    await audit(db, user.id, 'booking.rescheduled', 'booking', b.id, { from: b.starts_at, to: newStart, role });
+    return { from: b.starts_at };
+  });
+  return { booking: await getBookingFor(user, bookingId), ...result };
 }
 
 // ------------------------------------------------------------------------------------------ payments
