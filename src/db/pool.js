@@ -5,7 +5,11 @@ import { config } from '../config.js';
 pg.types.setTypeParser(20, (v) => Number(v));
 pg.types.setTypeParser(1700, (v) => Number(v));
 
-export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10 });
+export const pool = new pg.Pool({
+  connectionString: config.databaseUrl,
+  max: 10,
+  ...(config.databaseSsl ? { ssl: { rejectUnauthorized: false } } : {}),
+});
 
 export const query = (text, params) => pool.query(text, params);
 

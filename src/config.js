@@ -14,6 +14,11 @@ export const config = {
   env: env.NODE_ENV || 'development',
   isTest,
   isProd: env.NODE_ENV === 'production',
+  // Public demo deployment: simulated payments and on-screen OTP stay enabled in production,
+  // and sample data is (re)loaded automatically. Never turn this on for a real launch.
+  demoMode: env.DEMO_MODE === 'true',
+  demoReseedHours: Number(env.DEMO_RESEED_HOURS || 24),
+  databaseSsl: env.DATABASE_SSL === 'true',
   port: Number(env.PORT || 4173),
   databaseUrl: isTest
     ? (env.TEST_DATABASE_URL || 'postgres://lawyerup:lawyerup@localhost:5432/lawyerup_test')

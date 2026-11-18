@@ -32,7 +32,7 @@ r.post('/otp/request', limiter(10), ah(async (req, res) => {
   const provider = otpProvider();
   await provider.send(phone, code);
   // In development (console provider) we return the code so you can sign up without an SMS gateway.
-  res.json({ sent: true, ...(provider.exposesCodeInDev && !config.isProd ? { devCode: code } : {}) });
+  res.json({ sent: true, ...(provider.exposesCodeInDev && (!config.isProd || config.demoMode) ? { devCode: code } : {}) });
 }));
 
 async function consumeOtp(db, phone, code) {

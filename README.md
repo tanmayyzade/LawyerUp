@@ -72,6 +72,23 @@ pending_payment ──(payment captured)──▶ confirmed ──(lawyer marks 
 4. **Video:** replace the Jitsi rooms with a provider that issues expiring, per-participant tokens (e.g. 100ms, Daily, Twilio).
 5. **Production:** set `NODE_ENV=production` and a strong `JWT_SECRET`, run behind HTTPS (cookies become `Secure`), and move the in-memory rate limiter to Redis.
 
+## Live demo (Render)
+
+`render.yaml` is a Render Blueprint: a free Node web service plus a free PostgreSQL database. In the Render dashboard, choose **New → Blueprint** and select this repository. Render builds the app, runs the migrations on start, and loads the Mumbai demo data.
+
+The blueprint sets `DEMO_MODE=true`, which keeps these on in production so visitors can try every flow:
+
+- simulated payments
+- the on-screen sign-up code
+- sample data that refreshes every 24 hours (`DEMO_RESEED_HOURS`)
+
+Turn `DEMO_MODE` off before using real providers or real data.
+
+Render's free tier has limits:
+
+- The web service sleeps after about 15 minutes without visitors, and the first request after that takes about a minute.
+- Free databases expire after 30 days unless you upgrade.
+
 ## Adding a city
 
 Set `is_live = true` on a row in `cities`, add its `localities` with their coordinates, and onboard lawyers there. Search, slots and booking don't need any changes. Everything runs on IST.

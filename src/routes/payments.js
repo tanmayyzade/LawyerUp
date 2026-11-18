@@ -59,7 +59,7 @@ r.post('/failed', requireRole('client'), ah(async (req, res) => {
  * Produces the same signed result a real gateway would, which the browser then sends to /verify.
  */
 r.post('/mock/checkout', requireRole('client'), ah(async (req, res) => {
-  if (config.payments.provider !== 'mock' || config.isProd) throw notFound();
+  if (config.payments.provider !== 'mock' || (config.isProd && !config.demoMode)) throw notFound();
   const orderId = v.str(req.body?.orderId, 'orderId', { max: 100 });
   const outcome = v.oneOf(req.body?.outcome, 'outcome', ['success', 'failure']);
   await tx((db) => lockPaymentForClient(db, req.user, orderId));   // ownership check

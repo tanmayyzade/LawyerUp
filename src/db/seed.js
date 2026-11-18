@@ -144,10 +144,20 @@ async function seedDemoLawyerWeek(db, L, clientIds) {
     'Possession delayed since 2023. Client has agreement and payment receipts. Next step: send legal notice, then RERA complaint if no reply in 15 days.']);
 }
 
+/** Demo deployments: load sample data if the database is empty or the last load is older than DEMO_RESEED_HOURS. */
+export async function seedIfStale({ log = console.log } = {}) {
+  const { rows: [m] } = await pool.query(`SELECT updated_at FROM app_meta WHERE key = 'demo_seeded_at'`);
+  const ageHours = m ? (Date.now() - new Date(m.updated_at).getTime()) / 3_600_000 : Infinity;
+  if (ageHours < config.demoReseedHours) return false;
+  log(m ? `Demo data is ${Math.round(ageHours)}h old — refreshing.` : 'Empty database — loading demo data.');
+  await seed({ log });
+  return true;
+}
+
 const slugify = (s) => s.toLowerCase().replace(/[^a-z]+/g, '.').replace(/^\.|\.$/g, '');
 
 export async function seed({ log = console.log } = {}) {
-  if (config.isProd) throw new Error('Refusing to seed demo data in production.');
+  if (config.isProd && !config.demoMode) throw new Error('Refusing to seed demo data in production (set DEMO_MODE=true for a demo deployment).');
   const pw = await hashPassword(DEMO_PASSWORD);
 
   await tx(async (db) => {
@@ -240,6 +250,8 @@ export async function seed({ log = console.log } = {}) {
     await db.query(`INSERT INTO availability_rules (lawyer_id, weekday, start_time, end_time) VALUES ($1,1,'10:00','13:00')`, [pendingId]);
   });
 
+  await pool.query(`INSERT INTO app_meta (key, value) VALUES ('demo_seeded_at', now()::text)
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`);
   log(`Seeded ${LAWYERS.length} verified Mumbai lawyers, 1 pending lawyer, ${CITIES.length} cities, ${MUMBAI_LOCALITIES.length} Mumbai localities.`);
   log(`Demo logins (password ${DEMO_PASSWORD}): client@lawyerup.dev · lawyer@lawyerup.dev · admin@lawyerup.dev`);
 }
