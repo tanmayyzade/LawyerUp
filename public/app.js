@@ -75,7 +75,7 @@ function requireLogin(role) {
 }
 
 // ------------------------------------------------------------------ chrome: bar, footer, demo chip
-const LOGO = '<svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9"/><path d="M11.5 8v14.25l10-3.1"/><circle cx="23.4" cy="18.55" r="1.75"/></svg>';
+const LOGO = '<svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9"/><path d="M9.9 7.5v12.7a2.6 2.6 0 0 0 2.6 2.6h3.4l6.2-8.4"/></svg>';
 const ICON = {
   check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
   shield: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6L12 3Z"/><path d="m8.8 12.2 2.2 2.2 4.4-4.6"/></svg>',
