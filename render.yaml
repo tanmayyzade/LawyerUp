@@ -3,6 +3,7 @@
 databases:
   - name: lawyerup-db
     plan: free
+    region: singapore          # must match the web service region (private networking is per region)
     databaseName: lawyerup
     user: lawyerup
 
