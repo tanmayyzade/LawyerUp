@@ -707,3 +707,10 @@ table.data a { text-decoration: none; font-weight: 520; }
 .sheet-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .stack[style*="--gap"] > * + * { margin-top: var(--gap); }
 .booking-hero .row > * { flex: 0 0 auto; }
+
+/* Google sign-in */
+.google-btn { margin-top: 18px; height: 50px; gap: 10px; font-weight: 560; }
+.gicon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.or { display: flex; align-items: center; gap: 12px; margin: 18px 0 2px; color: var(--muted); font-size: 13px; }
+.or::before, .or::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+img.avatar { object-fit: cover; background: var(--wash); }

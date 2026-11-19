@@ -40,6 +40,9 @@ r.get('/', ah(async (req, res) => {
 // Create a booking (holds the slot) and open a payment order.
 r.post('/', requireRole('client'), ah(async (req, res) => {
   const b = req.body || {};
+  if (!req.user.phone) {
+    throw new HttpError(403, 'Add your mobile number so your lawyer can reach you.', 'phone_required');
+  }
   if (config.kyc.requiredForBooking && req.user.kyc_status !== 'verified') {
     throw new HttpError(403, 'Please verify your identity before booking a consultation.', 'kyc_required');
   }

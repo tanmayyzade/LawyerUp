@@ -84,6 +84,7 @@ const ICON = {
   clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
   badge: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.2 9.6 2.5l2-.2.6 1.9 1.8 1-.6 1.9.6 1.9-1.8 1-.6 1.9-2-.2L8 14.8l-1.6-1.3-2 .2-.6-1.9-1.8-1 .6-1.9-.6-1.9 1.8-1 .6-1.9 2 .2L8 1.2Z" fill="#000"/><path d="m5.4 8.2 1.7 1.7 3.5-3.6" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
+ICON.google = '<svg viewBox="0 0 24 24" aria-hidden="true" class="gicon"><circle cx="12" cy="12" r="9"/><path d="M15.8 12.2h-3.6M15.8 12.2a3.9 3.9 0 1 1-1.2-3"/></svg>';
 const verifiedBadge = () => raw(`<span class="verified">${ICON.badge}Verified advocate</span>`);
 
 function renderNav() {
@@ -101,7 +102,7 @@ function renderNav() {
   if (me?.role === 'admin') links.push(link('#/admin', 'Admin'));
   $('#nav').innerHTML = links.join('');
   $('#account').innerHTML = me
-    ? h`<a class="who" href="${me.role === 'lawyer' ? '#/practice/profile' : me.role === 'admin' ? '#/admin' : '#/bookings'}" title="${me.name}"><span class="avatar">${initials(me.name)}</span><span>${me.name.replace(/^Adv\.\s*/, '').split(' ')[0]}</span></a>
+    ? h`<a class="who" href="${me.role === 'lawyer' ? '#/practice/profile' : me.role === 'admin' ? '#/admin' : '#/bookings'}" title="${me.name}">${raw(me.avatarUrl ? h`<img class="avatar" src="${me.avatarUrl}" alt="" referrerpolicy="no-referrer" />` : h`<span class="avatar">${initials(me.name)}</span>`)}<span>${me.name.replace(/^Adv\.\s*/, '').split(' ')[0]}</span></a>
         <button class="btn ghost sm hide-sm" id="logout">Sign out</button>`
     : h`<a class="btn ghost sm hide-sm" href="#/login">Sign in</a><a class="btn sm" href="#/register">Get started</a>`;
   $('#logout')?.addEventListener('click', async () => {
@@ -140,7 +141,7 @@ function renderFooter() {
 function renderDemoChip() {
   const chip = $('#demo-chip');
   if (sessionStorage.getItem('lu.demoChip') === 'hidden') { chip.classList.add('hidden'); return; }
-  chip.innerHTML = '<span><b>Development build.</b> Payments, OTP and identity checks are simulated. Please don\'t enter Aadhaar numbers or confidential case details.</span><button aria-label="Dismiss">×</button>';
+  chip.innerHTML = '<span><b>Demo.</b> Payments and identity checks are simulated. Please don\'t enter Aadhaar numbers or confidential case details.</span><button aria-label="Dismiss">×</button>';
   chip.classList.remove('hidden');
   chip.querySelector('button').onclick = () => { chip.classList.add('hidden'); sessionStorage.setItem('lu.demoChip', 'hidden'); };
 }
@@ -442,6 +443,7 @@ async function viewLawyer({ path }) {
       sessionStorage.removeItem('lu.pending');
       go(`#/checkout/${res.booking.id}`);
     } catch (e) {
+      if (e.code === 'phone_required') { saveJSON('lu.pending', { lawyerId: l.id, sel }); toast(e.message); return go(`#/complete-profile?next=${encodeURIComponent(`#/lawyers/${l.id}`)}`); }
       if (e.code === 'kyc_required') { saveJSON('lu.pending', { lawyerId: l.id, sel }); return showKycPrompt(() => $('#continue').click()); }
       fail(e); if (e.code === 'slot_taken') { sel.slot = null; loadDay(sel.day); } else updateCta();
     }
@@ -765,6 +767,56 @@ function openReschedule(b, onDone) {
   });
 }
 
+// ------------------------------------------------------------------ Google sign-in & profile completion
+const GOOGLE_ERRORS = {
+  google_cancelled: 'Google sign-in was cancelled.',
+  google_expired: 'That sign-in took too long. Please try again.',
+  google_state: 'We couldn\'t verify that sign-in. Please try again.',
+  google_failed: 'Google sign-in didn\'t work. Please try again.',
+  google_unverified: 'Your Google email isn\'t verified, so we can\'t use it to sign in.',
+  google_off: 'Google sign-in isn\'t set up on this site yet.',
+  account_disabled: 'This account has been disabled.',
+};
+function googleButton(next, label = 'Continue with Google', note = '') {
+  if (!state.meta.googleSignIn) return '';
+  const href = `/api/auth/google/start${next ? `?next=${encodeURIComponent(next)}` : ''}`;
+  return h`<a class="btn ghost block google-btn" href="${href}">${raw(ICON.google)}<span>${label}</span></a>
+    ${raw(note ? h`<p class="micro muted" style="margin:8px 0 0;text-align:center">${note}</p>` : '')}
+    <div class="or"><span>or</span></div>`;
+}
+
+async function viewCompleteProfile({ params }) {
+  if (!requireLogin()) return;
+  const next = params.get('next') || '#/find';
+  if (!state.me.needsPhone) return go(next);
+  app.innerHTML = h`
+    <div class="auth"><div class="card glass">
+      <h1>One more step</h1>
+      <p class="muted">Hi ${firstName(state.me.name)}. Add your mobile number so your lawyer can reach you about consultations. It's only shared with lawyers you book.</p>
+      <form id="phone-form" style="margin-top:18px">
+        <div class="field"><label for="ph">Mobile number</label><input id="ph" name="phone" inputmode="numeric" autocomplete="tel-national" placeholder="10-digit mobile" required /></div>
+        <div id="otp-row" class="field hidden"><label for="otp">Verification code</label><input id="otp" name="otpCode" inputmode="numeric" maxlength="6" placeholder="6-digit code" /><div class="hint" id="otp-hint"></div></div>
+        <button class="btn block" id="ph-btn">Send code</button>
+      </form>
+      <p class="small" style="margin-top:14px"><a href="${next}">Skip for now</a> <span class="muted">You'll need it before booking.</span></p>
+    </div></div>`;
+  let sent = false;
+  const f = $('#phone-form');
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault(); const btn = $('#ph-btn'); btn.disabled = true;
+    try {
+      if (!sent) {
+        const r = await api('/auth/otp/request', { method: 'POST', body: { phone: f.phone.value } });
+        sent = true; $('#otp-row').classList.remove('hidden'); btn.textContent = 'Verify and continue';
+        if (r.devCode) { f.otpCode.value = r.devCode; $('#otp-hint').textContent = `Demo mode: no SMS is sent. Your code is ${r.devCode}.`; }
+        f.otpCode.focus(); return;
+      }
+      const { user } = await api('/auth/phone', { method: 'POST', body: { phone: f.phone.value, otpCode: f.otpCode.value } });
+      state.me = { ...state.me, ...user }; toast('Mobile number added.'); go(next);
+    } catch (err) { fail(err); } finally { btn.disabled = false; }
+  });
+}
+
 // ------------------------------------------------------------------ auth
 async function afterAuth(user, params) {
   state.me = user;
@@ -775,9 +827,11 @@ async function afterAuth(user, params) {
 
 function viewLogin({ params }) {
   if (state.me) return go('#/');
+  if (params.get('error')) setTimeout(() => toast(GOOGLE_ERRORS[params.get('error')] || 'Sign-in failed. Please try again.', true), 50);
   app.innerHTML = h`
     <div class="auth"><div class="card glass">
       <h1>Sign in</h1>
+      ${raw(googleButton(params.get('next')))}
       <form id="login" class="stack" style="margin-top:16px">
         <div><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required /></div>
         <div><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required /></div>
@@ -809,6 +863,7 @@ async function viewRegister({ params }) {
   app.innerHTML = h`
     <div class="auth" style="max-width:640px"><div class="card glass">
       <h1>Create your account</h1>
+      ${raw(googleButton(params.get('next'), 'Sign up with Google', 'For clients. Advocates, use the form below to add your enrolment details.'))}
       <div class="seg" id="role" style="margin:14px 0 18px"><button type="button" data-role="client" class="${role === 'client' ? 'on' : ''}">I need a lawyer</button><button type="button" data-role="lawyer" class="${role === 'lawyer' ? 'on' : ''}">I'm a lawyer</button></div>
       <form id="reg" autocomplete="on">
         <div class="field"><label>Full name</label><input name="name" required maxlength="120" autocomplete="name" placeholder="${role === 'lawyer' ? 'Adv. Firstname Lastname' : ''}" /></div>
@@ -1677,7 +1732,7 @@ const MARKETING = new Set(['/', '/how-it-works', '/for-lawyers', '/about', '/hel
 const routes = [
   [/^\/$/, viewHome], [/^\/find$/, viewSearch], [/^\/how-it-works$/, viewHow], [/^\/for-lawyers$/, viewForLawyers],
   [/^\/about$/, viewAbout], [/^\/help$/, viewHelp], [/^\/privacy$/, viewPrivacy], [/^\/terms$/, viewTerms], [/^\/compare$/, viewCompare], [/^\/lawyers\/[\w-]+$/, viewLawyer], [/^\/checkout\/[\w-]+$/, viewCheckout],
-  [/^\/bookings$/, viewBookings], [/^\/bookings\/[\w-]+$/, viewBooking], [/^\/login$/, viewLogin], [/^\/register$/, viewRegister],
+  [/^\/bookings$/, viewBookings], [/^\/bookings\/[\w-]+$/, viewBooking], [/^\/login$/, viewLogin], [/^\/complete-profile$/, viewCompleteProfile], [/^\/register$/, viewRegister],
   [/^\/workspace$/, () => go('#/practice')], [/^\/admin$/, viewAdmin],
   [/^\/practice$/, viewPractice], [/^\/practice\/schedule$/, viewSchedule], [/^\/practice\/appointments$/, viewAppointments],
   [/^\/practice\/clients$/, viewClients], [/^\/practice\/clients\/[\w-]+$/, viewClient], [/^\/practice\/messages$/, viewInbox],

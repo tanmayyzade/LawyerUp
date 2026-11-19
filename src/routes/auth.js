@@ -8,6 +8,8 @@ import { hashPassword, verifyPassword, sha256, rateLimit } from '../lib/security
 import * as v from '../lib/validate.js';
 import { otpProvider } from '../providers/otp.js';
 import { kycProvider } from '../providers/kyc.js';
+import jwt from 'jsonwebtoken';
+import { googleEnabled, pkcePair, authorizeUrl, identityFromCode } from '../providers/google.js';
 import { audit } from '../lib/audit.js';
 
 const r = Router();
@@ -15,7 +17,9 @@ const limiter = (max) => (config.isTest ? (_q, _s, n) => n() : rateLimit({ windo
 
 const publicUser = (u) => ({
   id: u.id, role: u.role, name: u.name, email: u.email, phone: u.phone,
-  phoneVerified: u.phone_verified, kycStatus: u.kyc_status,
+  phoneVerified: u.phone_verified, kycStatus: u.kyc_status, avatarUrl: u.avatar_url || null,
+  needsPhone: !u.phone,
+  signIn: { password: u.has_password ?? Boolean(u.password_hash), google: u.has_google ?? Boolean(u.google_sub) },
 });
 
 // ---------------------------------------------------------------- OTP
@@ -126,6 +130,7 @@ r.post('/login', limiter(20), ah(async (req, res) => {
   const { rows: [u] } = await query('SELECT * FROM users WHERE lower(email) = $1', [email]);
   // Same error and similar timing whether or not the account exists.
   const ok = u ? await verifyPassword(String(req.body.password || ''), u.password_hash) : (await hashPassword('x'), false);
+  if (u && !u.password_hash && u.google_sub) throw unauthorized('This account uses Google sign-in. Choose "Continue with Google".');
   if (!ok || !u.is_active) throw unauthorized('Email or password is incorrect.');
   issueSession(res, u);
   res.json({ user: publicUser(u) });
@@ -140,6 +145,77 @@ r.get('/me', ah(async (req, res) => {
     lawyer = (await query('SELECT verification_status, verification_note FROM lawyer_profiles WHERE user_id = $1', [req.user.id])).rows[0] || null;
   }
   res.json({ user: { ...publicUser(req.user), lawyer } });
+}));
+
+// ---------------------------------------------------------------- add a mobile number (Google accounts)
+r.post('/phone', requireAuth, limiter(20), ah(async (req, res) => {
+  const phone = v.phone(req.body.phone);
+  const user = await tx(async (db) => {
+    await consumeOtp(db, phone, req.body.otpCode);
+    const taken = await db.query('SELECT 1 FROM users WHERE phone = $1 AND id <> $2', [phone, req.user.id]);
+    if (taken.rowCount) throw conflict('This mobile number is already used by another account.', 'phone_taken');
+    const { rows: [u] } = await db.query(
+      `UPDATE users SET phone = $2, phone_verified = true WHERE id = $1 RETURNING *`, [req.user.id, phone]);
+    await audit(db, req.user.id, 'user.phone_added', 'user', req.user.id);
+    return u;
+  });
+  res.json({ user: publicUser(user) });
+}));
+
+// ---------------------------------------------------------------- Sign in with Google
+const OAUTH_COOKIE = 'lu_oauth';
+const safeNext = (n) => (typeof n === 'string' && /^#\/[\w\-/?=&%.]*$/.test(n) ? n : '');
+const redirectUri = (req) => `${config.publicUrl || `${req.protocol}://${req.get('host')}`}/api/auth/google/callback`;
+const homeFor = (u) => (u.role === 'lawyer' ? '#/practice' : u.role === 'admin' ? '#/admin' : '#/find');
+
+r.get('/google/start', (req, res) => {
+  if (!googleEnabled()) return res.redirect('/#/login?error=google_off');
+  const { verifier, challenge } = pkcePair();
+  const state = crypto.randomBytes(16).toString('base64url');
+  const token = jwt.sign({ state, verifier, next: safeNext(req.query.next) }, config.jwtSecret, { expiresIn: '10m' });
+  res.cookie(OAUTH_COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: config.isProd, maxAge: 600_000, path: '/api/auth/google' });
+  res.redirect(authorizeUrl({ redirectUri: redirectUri(req), state, challenge }));
+});
+
+r.get('/google/callback', ah(async (req, res) => {
+  const fail = (code) => { res.clearCookie(OAUTH_COOKIE, { path: '/api/auth/google' }); res.redirect(`/#/login?error=${code}`); };
+  if (!googleEnabled()) return fail('google_off');
+  if (req.query.error) return fail('google_cancelled');
+  let saved;
+  try { saved = jwt.verify(req.cookies?.[OAUTH_COOKIE] || '', config.jwtSecret); } catch { return fail('google_expired'); }
+  if (!req.query.state || req.query.state !== saved.state || !req.query.code) return fail('google_state');
+
+  let id;
+  try { id = await identityFromCode({ code: String(req.query.code), redirectUri: redirectUri(req), verifier: saved.verifier }); }
+  catch (err) { if (!config.isTest) console.error('[google]', err.message); return fail('google_failed'); }
+  if (!id.emailVerified) return fail('google_unverified');
+
+  const user = await tx(async (db) => {
+    let { rows: [u] } = await db.query('SELECT * FROM users WHERE google_sub = $1', [id.sub]);
+    if (!u) {
+      // Same verified email as an existing account: link it.
+      ({ rows: [u] } = await db.query('SELECT * FROM users WHERE lower(email) = $1 FOR UPDATE', [id.email]));
+      if (u) {
+        ({ rows: [u] } = await db.query(
+          `UPDATE users SET google_sub = $2, email_verified = true, avatar_url = COALESCE(avatar_url, $3) WHERE id = $1 RETURNING *`,
+          [u.id, id.sub, id.picture]));
+        await audit(db, u.id, 'user.google_linked', 'user', u.id);
+      } else {
+        ({ rows: [u] } = await db.query(
+          `INSERT INTO users (role, name, email, google_sub, avatar_url, email_verified)
+           VALUES ('client', $1, $2, $3, $4, true) RETURNING *`,
+          [id.name.length >= 2 ? id.name : id.email, id.email, id.sub, id.picture]));
+        await audit(db, u.id, 'user.registered', 'user', u.id, { role: 'client', via: 'google' });
+      }
+    }
+    return u;
+  });
+  if (!user.is_active) return fail('account_disabled');
+
+  res.clearCookie(OAUTH_COOKIE, { path: '/api/auth/google' });
+  issueSession(res, user);
+  const next = saved.next || homeFor(user);
+  res.redirect(!user.phone && user.role === 'client' ? `/#/complete-profile?next=${encodeURIComponent(next)}` : `/${next}`);
 }));
 
 // ---------------------------------------------------------------- identity verification (sandbox in M1)

@@ -17,7 +17,6 @@ export const config = {
   // Public demo deployment: simulated payments and on-screen OTP stay enabled in production,
   // and sample data is (re)loaded automatically. Never turn this on for a real launch.
   demoMode: env.DEMO_MODE === 'true',
-  demoReseedHours: Number(env.DEMO_RESEED_HOURS || 24),
   databaseSsl: env.DATABASE_SSL === 'true',
   port: Number(env.PORT || 4173),
   databaseUrl: isTest
@@ -54,6 +53,13 @@ export const config = {
     provider: env.KYC_PROVIDER || 'sandbox',                    // sandbox | (partner AUA/KUA — see README)
     requiredForBooking: env.REQUIRE_KYC_FOR_BOOKING !== 'false',
   },
+  // Sign in with Google (OAuth 2.0 / OpenID Connect). Free: create a Web client in Google Cloud Console.
+  google: {
+    clientId: env.GOOGLE_CLIENT_ID || '',
+    clientSecret: env.GOOGLE_CLIENT_SECRET || '',
+  },
+  // Public origin used for OAuth redirects, e.g. https://lawyerup-sewl.onrender.com (falls back to the request host).
+  publicUrl: (env.PUBLIC_URL || '').replace(/\/$/, ''),
   video: {
     provider: env.VIDEO_PROVIDER || 'jitsi',                    // jitsi | none
     jitsiBaseUrl: env.JITSI_BASE_URL || 'https://meet.jit.si',

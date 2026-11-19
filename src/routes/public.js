@@ -43,6 +43,8 @@ r.get('/meta', ah(async (_req, res) => {
     languages: langs.rows.map((r) => r.l),
     defaultCity: config.defaultCity,
     platformFeePercent: config.platformFeeBps / 100,
+    googleSignIn: Boolean(config.google.clientId && config.google.clientSecret),
+    demoMode: config.demoMode || !config.isProd,
     freeCancelHours: config.freeCancelHours,
     bookingHoldMinutes: config.bookingHoldMinutes,
     payments: { provider: config.payments.provider, razorpayKeyId: config.payments.provider === 'razorpay' ? config.payments.razorpayKeyId : null },

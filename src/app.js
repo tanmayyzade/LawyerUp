@@ -31,7 +31,7 @@ export function createApp() {
         "script-src 'self' https://checkout.razorpay.com https://unpkg.com",
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com",
         "font-src 'self' https://fonts.gstatic.com",
-        "img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com",
+        "img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com https://*.googleusercontent.com",
         "connect-src 'self' https://*.razorpay.com",
         "frame-src https://api.razorpay.com https://checkout.razorpay.com",
       ].join('; '),

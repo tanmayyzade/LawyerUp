@@ -82,7 +82,7 @@ The blueprint sets `DEMO_MODE=true`, which keeps these on in production so visit
 
 - simulated payments
 - the on-screen sign-up code
-- sample data that refreshes every 24 hours (`DEMO_RESEED_HOURS`)
+- sample data: loaded once into an empty database. After that, the demo lawyer's diary is topped up with new future bookings. Nothing is ever deleted, so real sign-ups and bookings persist.
 
 Turn `DEMO_MODE` off before using real providers or real data.
 
@@ -90,6 +90,35 @@ Render's free tier has limits:
 
 - The web service sleeps after about 15 minutes without visitors, and the first request after that takes about a minute.
 - Free databases expire after 30 days unless you upgrade.
+
+## Sign in with Google (free)
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a project.
+2. Set up **Google Auth Platform → Branding**:
+   - App name: LawyerUp
+   - Support email: your own address
+   - Audience: **External**
+3. Choose **Publish app**. The `openid`, `email` and `profile` scopes don't need Google's review.
+4. Create an OAuth client: **Clients → Create client → Web application**, with these authorized redirect URIs:
+   - `https://lawyerup-sewl.onrender.com/api/auth/google/callback`
+   - `http://localhost:4173/api/auth/google/callback`
+5. In Render, open the service, go to **Environment**, and set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. For local use, put them in `.env`.
+
+How sign-in works:
+
+- New Google users get a client account and are asked once for their mobile number before booking.
+- If an existing account has the same verified email, Google sign-in is linked to it.
+- The server handles the whole flow (authorization code + PKCE), so tokens never reach the browser.
+
+## Free database that doesn't expire (Neon)
+
+Render's free PostgreSQL is deleted after 30 days. [Neon](https://neon.tech) has a free plan that doesn't expire. To switch:
+
+1. Create a Neon project in the **AWS Asia Pacific (Singapore)** region.
+2. Copy its connection string. It looks like `postgresql://…neon.tech/neondb?sslmode=require`.
+3. Set it as `DATABASE_URL` on the Render service.
+
+On first start, LawyerUp creates the tables and loads the demo data.
 
 ## Adding a city
 

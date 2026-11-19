@@ -3,6 +3,8 @@ process.env.PAYMENT_PROVIDER = process.env.PAYMENT_PROVIDER || 'mock';
 process.env.RAZORPAY_WEBHOOK_SECRET = 'whsec_test';
 process.env.RAZORPAY_KEY_SECRET = 'rzp_secret_test';
 process.env.RAZORPAY_KEY_ID = 'rzp_test_key';
+process.env.GOOGLE_CLIENT_ID = 'test-client.apps.googleusercontent.com';
+process.env.GOOGLE_CLIENT_SECRET = 'test-secret';
 
 import request from 'supertest';
 const { createApp } = await import('../src/app.js');

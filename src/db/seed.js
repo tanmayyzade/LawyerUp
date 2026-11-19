@@ -144,14 +144,65 @@ async function seedDemoLawyerWeek(db, L, clientIds) {
     'Possession delayed since 2023. Client has agreement and payment receipts. Next step: send legal notice, then RERA complaint if no reply in 15 days.']);
 }
 
-/** Demo deployments: load sample data if the database is empty or the last load is older than DEMO_RESEED_HOURS. */
+/**
+ * Demo deployments. Never deletes anything:
+ *  - an empty database gets the full demo data set;
+ *  - otherwise the demo lawyer's diary is topped up with a few future bookings so the portal stays lively.
+ * Real users' accounts and bookings are left untouched.
+ */
 export async function seedIfStale({ log = console.log } = {}) {
-  const { rows: [m] } = await pool.query(`SELECT updated_at FROM app_meta WHERE key = 'demo_seeded_at'`);
-  const ageHours = m ? (Date.now() - new Date(m.updated_at).getTime()) / 3_600_000 : Infinity;
-  if (ageHours < config.demoReseedHours) return false;
-  log(m ? `Demo data is ${Math.round(ageHours)}h old — refreshing.` : 'Empty database — loading demo data.');
-  await seed({ log });
-  return true;
+  const { rows: [{ n }] } = await pool.query('SELECT count(*)::int AS n FROM users');
+  if (n === 0) { log('Empty database — loading demo data.'); await seed({ log }); return 'seeded'; }
+  const added = await topUpDemoWeek();
+  if (added) log(`Added ${added} upcoming demo bookings for the demo lawyer.`);
+  return added ? 'topped_up' : 'ok';
+}
+
+async function topUpDemoWeek() {
+  const { rows: [lawyer] } = await pool.query(
+    `SELECT u.id, lp.fee_paise, lp.session_minutes FROM users u JOIN lawyer_profiles lp ON lp.user_id = u.id
+      WHERE u.email = 'lawyer@lawyerup.dev'`);
+  if (!lawyer) return 0;
+  const { rows: [{ upcoming }] } = await pool.query(
+    `SELECT count(*)::int AS upcoming FROM bookings WHERE lawyer_id = $1 AND status = 'confirmed' AND starts_at > now()`, [lawyer.id]);
+  if (upcoming >= 5) return 0;
+  const { rows: clients } = await pool.query(
+    `SELECT id FROM users WHERE role = 'client' AND (email LIKE '%@example.com' OR email = 'client@lawyerup.dev') ORDER BY email`);
+  if (!clients.length) return 0;
+
+  const topics = ['Builder has delayed possession by two years', 'Society refusing NOC for flat sale', 'Tenant not vacating after notice',
+    'Title check before buying a flat', 'Leave and licence agreement review', 'Redevelopment offer from builder'];
+  const times = ['10:30', '12:00', '15:30', '17:00'];
+  const modes = ['video', 'phone', 'in_person', 'video'];
+  const fee = lawyer.fee_paise; const pf = Math.round(fee * config.platformFeeBps / 10_000);
+  let added = 0; let k = 0; let d = new Date();
+  for (let dayCount = 0; dayCount < 5 && added < 6;) {
+    d = new Date(d.getTime() + 86_400_000);
+    const ist = dateToIst(d);
+    if (ist.weekday === 0 || ist.weekday === 6) continue;
+    dayCount += 1;
+    for (const time of times.slice(dayCount % 2, (dayCount % 2) + 2)) {
+      const start = istToDate(ist.day, time);
+      const end = new Date(start.getTime() + lawyer.session_minutes * 60_000);
+      const mode = modes[k % modes.length]; const clientId = clients[k % clients.length].id; k += 1;
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const { rows: [b] } = await client.query(
+          `INSERT INTO bookings (client_id, lawyer_id, starts_at, ends_at, mode, status, fee_paise, platform_fee_paise, total_paise, issue_summary, meeting_url)
+           VALUES ($1,$2,$3,$4,$5,'confirmed',$6,$7,$8,$9,$10) RETURNING id`,
+          [clientId, lawyer.id, start, end, mode, fee, pf, fee + pf, topics[k % topics.length],
+            mode === 'video' ? `https://meet.jit.si/LawyerUp-demo-${Date.now().toString(36)}${k}` : null]);
+        await client.query(`INSERT INTO payments (booking_id, provider, provider_order_id, provider_payment_id, amount_paise, status)
+                            VALUES ($1,'mock',$2,$3,$4,'captured')`, [b.id, `demo_order_${b.id}`, `demo_pay_${b.id}`, fee + pf]);
+        await client.query('COMMIT'); added += 1;
+      } catch (err) {
+        await client.query('ROLLBACK');
+        if (err.code !== '23P01') throw err;   // slot already taken (by a real user or earlier top-up): skip it
+      } finally { client.release(); }
+    }
+  }
+  return added;
 }
 
 const slugify = (s) => s.toLowerCase().replace(/[^a-z]+/g, '.').replace(/^\.|\.$/g, '');

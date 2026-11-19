@@ -29,7 +29,8 @@ export async function loadUser(req, _res, next) {
   try {
     const { sub } = jwt.verify(token, config.jwtSecret);
     const { rows } = await query(
-      `SELECT id, role, name, email, phone, phone_verified, kyc_status, is_active FROM users WHERE id = $1`, [sub]);
+      `SELECT id, role, name, email, phone, phone_verified, kyc_status, is_active, avatar_url,
+              password_hash IS NOT NULL AS has_password, google_sub IS NOT NULL AS has_google FROM users WHERE id = $1`, [sub]);
     if (rows[0]?.is_active) req.user = rows[0];
   } catch { /* invalid/expired token: treat as signed out */ }
   next();
