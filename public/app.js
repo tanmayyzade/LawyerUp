@@ -85,7 +85,11 @@ const ICON = {
   badge: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.2 9.6 2.5l2-.2.6 1.9 1.8 1-.6 1.9.6 1.9-1.8 1-.6 1.9-2-.2L8 14.8l-1.6-1.3-2 .2-.6-1.9-1.8-1 .6-1.9-.6-1.9 1.8-1 .6-1.9 2 .2L8 1.2Z" fill="#000"/><path d="m5.4 8.2 1.7 1.7 3.5-3.6" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 ICON.google = '<svg viewBox="0 0 24 24" aria-hidden="true" class="gicon"><circle cx="12" cy="12" r="9"/><path d="M15.8 12.2h-3.6M15.8 12.2a3.9 3.9 0 1 1-1.2-3"/></svg>';
-const verifiedBadge = () => raw(`<span class="verified">${ICON.badge}Verified advocate</span>`);
+const isDemo = () => Boolean(state.meta?.demoMode);
+// On the public demo every listed lawyer is fictional, so public cards say so instead of claiming verification.
+const verifiedBadge = (own = false) => raw(!own && isDemo()
+  ? '<span class="verified sample">Sample profile · fictional</span>'
+  : `<span class="verified">${ICON.badge}Verified advocate</span>`);
 
 function renderNav() {
   const me = state.me;
@@ -140,10 +144,8 @@ function renderFooter() {
 
 function renderDemoChip() {
   const chip = $('#demo-chip');
-  if (sessionStorage.getItem('lu.demoChip') === 'hidden') { chip.classList.add('hidden'); return; }
-  chip.innerHTML = '<span><b>Demo.</b> Payments and identity checks are simulated. Please don\'t enter Aadhaar numbers or confidential case details.</span><button aria-label="Dismiss">×</button>';
+  chip.innerHTML = '<span><b>This is a demo.</b> The lawyers listed are fictional sample profiles. Bookings, payments and ID checks are simulated, so no money moves. Don\'t enter real passwords, ID numbers or case details.</span>';
   chip.classList.remove('hidden');
-  chip.querySelector('button').onclick = () => { chip.classList.add('hidden'); sessionStorage.setItem('lu.demoChip', 'hidden'); };
 }
 
 // ------------------------------------------------------------------ search
@@ -163,7 +165,7 @@ async function viewSearch({ params }) {
   app.innerHTML = h`
     <section class="page-head">
       <h1>Find a lawyer near you</h1>
-      <p class="muted">${state.meta.counts.lawyers} verified advocates in ${city.name}. Fees are shown before you book.</p>
+      <p class="muted">${raw(isDemo() ? h`${state.meta.counts.lawyers} fictional sample profiles in ${city.name} (demo). Fees are shown before you book.` : h`${state.meta.counts.lawyers} verified advocates in ${city.name}. Fees are shown before you book.`)}</p>
       <form id="search" class="searchbar glass" autocomplete="off">
         <div><label for="area">Area</label>
           <input id="area" name="area" list="places" placeholder="e.g. Bandra West, Andheri, Fort" value="${s.lat ? '' : s.area}" />
@@ -1369,7 +1371,7 @@ async function viewPracticeProfile() {
       <aside class="stack">
         <div class="card glass">
           <h3>Verification</h3>
-          ${raw(vs === 'verified' ? h`${verifiedBadge()}<p class="small muted" style="margin-top:8px">${p.bar_council}, enrolment ${p.enrollment_number}</p>`
+          ${raw(vs === 'verified' ? h`${verifiedBadge(true)}<p class="small muted" style="margin-top:8px">${p.bar_council}, enrolment ${p.enrollment_number}</p>`
             : h`<span class="pill ${vs === 'pending' ? '' : 'warn'}">${vs === 'pending' ? 'In review' : 'Not approved'}</span><p class="small muted" style="margin-top:8px">${vs === 'pending' ? 'Your profile goes live once we confirm your enrolment.' : p.verification_note || ''}</p>`)}
         </div>
         <div class="card glass">
@@ -1554,6 +1556,7 @@ async function viewHome() {
       <div>
         <h1 class="display">Talk to the right lawyer. Know the fee first.</h1>
         <p class="lede">LawyerUp lists verified advocates across Mumbai with their fee, session length and open times, so you can book a consultation in a few minutes.</p>
+        ${raw(isDemo() ? '<p class="small muted" style="margin-top:-8px">You\'re viewing a product demo. Every lawyer here is a fictional sample, and nothing you book is real.</p>' : '')}
         <form class="hero-search glass" id="hero-search" autocomplete="off">
           <label class="field-inline"><span>Area</span><input name="area" list="hero-places" placeholder="e.g. Bandra West" /></label>
           <datalist id="hero-places">${places.map((p) => raw(h`<option value="${p.name}">`))}</datalist>
@@ -1561,7 +1564,7 @@ async function viewHome() {
           <button class="btn">Find lawyers</button>
         </form>
         <div class="hero-note">
-          <span>${raw(ICON.shield)}Bar Council enrolment checked</span>
+          <span>${raw(ICON.shield)}${isDemo() ? 'Demo with sample lawyers' : 'Bar Council enrolment checked'}</span>
           <span>${raw(ICON.receipt)}Fee shown before you pay</span>
           <span>${raw(ICON.clock)}Free cancellation up to ${m.freeCancelHours} hours before</span>
         </div>
