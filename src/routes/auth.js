@@ -2,7 +2,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { query, tx } from '../db/pool.js';
-import { ah, badRequest, conflict, unauthorized } from '../lib/errors.js';
+import { ah, badRequest, conflict, unauthorized, HttpError } from '../lib/errors.js';
 import { issueSession, clearSession, requireAuth } from '../lib/auth.js';
 import { hashPassword, verifyPassword, sha256, rateLimit } from '../lib/security.js';
 import * as v from '../lib/validate.js';
@@ -125,13 +125,25 @@ r.post('/register', limiter(20), ah(async (req, res) => {
 }));
 
 // ---------------------------------------------------------------- login / logout / me
+const PORTAL_LOGIN = { client: '#/login', lawyer: '#/lawyer/login', admin: '#/admin/login' };
+const PORTAL_HINT = {
+  client: 'This is a client account. Sign in on the client sign-in page.',
+  lawyer: 'This is a lawyer account. Sign in on the LawyerUp for Lawyers page.',
+  admin: 'This is a staff account. Sign in on the admin page.',
+};
+
 r.post('/login', limiter(20), ah(async (req, res) => {
+  const portal = req.body.portal === undefined ? null : v.oneOf(req.body.portal, 'Sign-in page', ['client', 'lawyer', 'admin']);
   const email = v.email(req.body.email);
   const { rows: [u] } = await query('SELECT * FROM users WHERE lower(email) = $1', [email]);
   // Same error and similar timing whether or not the account exists.
   const ok = u ? await verifyPassword(String(req.body.password || ''), u.password_hash) : (await hashPassword('x'), false);
   if (u && !u.password_hash && u.google_sub) throw unauthorized('This account uses Google sign-in. Choose "Continue with Google".');
   if (!ok || !u.is_active) throw unauthorized('Email or password is incorrect.');
+  // Each audience signs in on its own page. Only after the password is correct do we say which page fits.
+  if (portal && u.role !== portal) {
+    throw new HttpError(403, PORTAL_HINT[u.role], 'wrong_portal', { portal: u.role, href: PORTAL_LOGIN[u.role] });
+  }
   issueSession(res, u);
   res.json({ user: publicUser(u) });
 }));

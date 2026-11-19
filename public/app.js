@@ -40,7 +40,7 @@ const STATUS = {
 const statusPill = (s) => h`<span class="pill ${STATUS[s]?.[1] || ''}">${STATUS[s]?.[0] || s}</span>`;
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-class ApiError extends Error { constructor(msg, status, code) { super(msg); this.status = status; this.code = code; } }
+class ApiError extends Error { constructor(msg, status, code, details) { super(msg); this.status = status; this.code = code; this.details = details; } }
 async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(`/api${path}`, {
     method, credentials: 'same-origin',
@@ -48,7 +48,7 @@ async function api(path, { method = 'GET', body } = {}) {
     body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(data?.error?.message || `Request failed (${res.status})`, res.status, data?.error?.code);
+  if (!res.ok) throw new ApiError(data?.error?.message || `Request failed (${res.status})`, res.status, data?.error?.code, data?.error?.details);
   return data;
 }
 
@@ -68,9 +68,18 @@ function parseHash() {
 function every(ms, fn) { const id = setInterval(fn, ms); state.timers.push(id); return id; }
 const loading = () => { app.innerHTML = '<div class="spinner" aria-label="Loading"></div>'; };
 
+const LOGIN_FOR = { client: '#/login', lawyer: '#/lawyer/login', admin: '#/admin/login' };
+const loginFor = (role) => LOGIN_FOR[role] || '#/login';
+/** Which sign-in page a protected path belongs to. */
+const portalOfPath = (path) => (path.startsWith('/practice') || path.startsWith('/workspace') ? 'lawyer' : path.startsWith('/admin') ? 'admin' : 'client');
 function requireLogin(role) {
-  if (!state.me) { go(`#/login?next=${encodeURIComponent(location.hash)}`); return false; }
-  if (role && state.me.role !== role) { app.innerHTML = h`<div class="empty">This page is for ${role} accounts.</div>`; return false; }
+  if (!state.me) { go(`${loginFor(role || 'client')}?next=${encodeURIComponent(location.hash)}`); return false; }
+  if (role && state.me.role !== role) {
+    const label = { client: 'client', lawyer: 'lawyer', admin: 'staff' }[role];
+    app.innerHTML = h`<div class="empty">This page is for ${label} accounts, and you're signed in with a ${state.me.role === 'admin' ? 'staff' : state.me.role} account.<br/>
+      <a class="btn ghost sm" style="margin-top:12px" href="${homeOf(state.me)}">Go to your home page</a></div>`;
+    return false;
+  }
   return true;
 }
 
@@ -91,6 +100,7 @@ const verifiedBadge = (own = false) => raw(!own && isDemo()
   ? '<span class="verified sample">Sample profile · fictional</span>'
   : `<span class="verified">${ICON.badge}Verified advocate</span>`);
 
+const LAWYER_SIDE = new Set(['/for-lawyers', '/lawyer/login', '/lawyer/signup']);
 function renderNav() {
   const me = state.me;
   const { path } = parseHash();
@@ -108,12 +118,14 @@ function renderNav() {
   $('#account').innerHTML = me
     ? h`<a class="who" href="${me.role === 'lawyer' ? '#/practice/profile' : me.role === 'admin' ? '#/admin' : '#/bookings'}" title="${me.name}">${raw(me.avatarUrl ? h`<img class="avatar" src="${me.avatarUrl}" alt="" referrerpolicy="no-referrer" />` : h`<span class="avatar">${initials(me.name)}</span>`)}<span>${me.name.replace(/^Adv\.\s*/, '').split(' ')[0]}</span></a>
         <button class="btn ghost sm hide-sm" id="logout">Sign out</button>`
-    : h`<a class="btn ghost sm hide-sm" href="#/login">Sign in</a><a class="btn sm" href="#/register">Get started</a>`;
+    : (LAWYER_SIDE.has(path)
+      ? h`<a class="btn ghost sm hide-sm" href="#/lawyer/login">Lawyer sign in</a><a class="btn sm" href="#/lawyer/signup">Join as a lawyer</a>`
+      : h`<a class="btn ghost sm hide-sm" href="#/login">Sign in</a><a class="btn sm" href="#/register">Get started</a>`);
   $('#logout')?.addEventListener('click', async () => {
     await api('/auth/logout', { method: 'POST' }); state.me = null; toast('Signed out.'); go('#/');
   });
   if (me) $('#nav').insertAdjacentHTML('beforeend', '<a href="#" class="mobile-only" id="logout-m">Sign out</a>');
-  else $('#nav').insertAdjacentHTML('beforeend', '<a href="#/login" class="mobile-only">Sign in</a>');
+  else $('#nav').insertAdjacentHTML('beforeend', LAWYER_SIDE.has(path) ? '<a href="#/lawyer/login" class="mobile-only">Lawyer sign in</a>' : '<a href="#/login" class="mobile-only">Sign in</a>');
   $('#logout-m')?.addEventListener('click', (e) => { e.preventDefault(); $('#logout').click(); });
 }
 $('.menu-toggle').addEventListener('click', () => {
@@ -133,10 +145,10 @@ function renderFooter() {
         <li><a href="#/find">Find a lawyer</a></li><li><a href="#/how-it-works">How it works</a></li>
         <li><a href="#/how-it-works?s=fees">Fees and refunds</a></li><li><a href="#/help">Help</a></li></ul></div>
       <div><h4>Lawyers</h4><ul>
-        <li><a href="#/for-lawyers">Join LawyerUp</a></li><li><a href="#/register?role=lawyer">Create a profile</a></li>
-        <li><a href="#/practice">Your practice</a></li></ul></div>
+        <li><a href="#/for-lawyers">Join LawyerUp</a></li><li><a href="#/lawyer/signup">Create a profile</a></li>
+        <li><a href="#/lawyer/login">Lawyer sign in</a></li></ul></div>
       <div><h4>Company</h4><ul>
-        <li><a href="#/about">About</a></li><li><a href="#/privacy">Privacy</a></li><li><a href="#/terms">Terms</a></li></ul></div>
+        <li><a href="#/about">About</a></li><li><a href="#/privacy">Privacy</a></li><li><a href="#/terms">Terms</a></li><li><a href="#/admin/login">Staff sign in</a></li></ul></div>
     </div>
     <div class="fine"><span>© ${new Date().getFullYear()} LawyerUp</span>
       <span>LawyerUp connects you with independent advocates. Nothing on this site is legal advice.</span></div>`;
@@ -827,93 +839,155 @@ async function afterAuth(user, params) {
   go(next || (user.role === 'lawyer' ? '#/practice' : user.role === 'admin' ? '#/admin' : '#/'));
 }
 
-function viewLogin({ params }) {
-  if (state.me) return go('#/');
-  if (params.get('error')) setTimeout(() => toast(GOOGLE_ERRORS[params.get('error')] || 'Sign-in failed. Please try again.', true), 50);
-  app.innerHTML = h`
-    <div class="auth"><div class="card glass">
-      <h1>Sign in</h1>
-      ${raw(googleButton(params.get('next')))}
-      <form id="login" class="stack" style="margin-top:16px">
-        <div><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required /></div>
+const PORTAL = {
+  client: {
+    title: 'Sign in', sub: 'Book and manage your consultations.',
+    demo: [['client@lawyerup.dev', 'Demo client']],
+    footer: h`<p class="small" style="margin-top:14px">New to LawyerUp? <a href="#/register">Create an account</a></p>
+      <p class="small muted">Are you an advocate? <a href="#/lawyer/login">Sign in to LawyerUp for Lawyers</a></p>`,
+  },
+  lawyer: {
+    eyebrow: 'LawyerUp for Lawyers', title: 'Sign in to your practice', sub: 'Your schedule, clients, messages and earnings.',
+    demo: [['lawyer@lawyerup.dev', 'Demo lawyer']],
+    footer: h`<p class="small" style="margin-top:14px">Not on LawyerUp yet? <a href="#/lawyer/signup">Create a lawyer profile</a></p>
+      <p class="small muted">Looking for a lawyer? <a href="#/login">Client sign in</a></p>`,
+  },
+  admin: {
+    eyebrow: 'LawyerUp staff', title: 'Admin sign in', sub: 'For the team that verifies advocates. There is no public sign-up.',
+    demo: [['admin@lawyerup.dev', 'Demo admin']],
+    footer: h`<p class="small muted" style="margin-top:14px">Not staff? <a href="#/login">Client sign in</a> or <a href="#/lawyer/login">lawyer sign in</a>.</p>`,
+  },
+};
+
+function authShell(portal, inner) {
+  const p = PORTAL[portal];
+  return h`<div class="auth auth-${portal}"><div class="card glass">
+    ${raw(p.eyebrow ? h`<p class="auth-kicker">${p.eyebrow}</p>` : '')}
+    <h1>${p.title}</h1><p class="muted" style="margin:-4px 0 18px">${p.sub}</p>
+    ${raw(inner)}
+  </div></div>`;
+}
+
+function signInView(portal) {
+  return ({ params }) => {
+    if (state.me) return go(homeOf(state.me));
+    if (params.get('error')) setTimeout(() => toast(GOOGLE_ERRORS[params.get('error')] || 'Sign-in failed. Please try again.', true), 50);
+    const p = PORTAL[portal];
+    app.innerHTML = authShell(portal, h`
+      ${raw(portal === 'client' ? googleButton(params.get('next')) : '')}
+      <form id="login" class="stack" style="margin-top:${portal === 'client' ? 16 : 4}px">
+        <div><label for="email">${portal === 'lawyer' ? 'Work email' : 'Email'}</label><input id="email" name="email" type="email" autocomplete="email" required /></div>
         <div><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required /></div>
         <button class="btn block">Sign in</button>
       </form>
-      <p class="small" style="margin-top:14px">New to LawyerUp? <a href="#/register${params.get('next') ? `?next=${encodeURIComponent(params.get('next'))}` : ''}">Create an account</a></p>
-      <div class="divider"></div>
-      <div class="demo-logins muted">Demo accounts (password <span class="mono">Demo@1234</span>):<br>
-        <button class="btn ghost sm" data-demo="client@lawyerup.dev">Client</button>
-        <button class="btn ghost sm" data-demo="lawyer@lawyerup.dev">Lawyer</button>
-        <button class="btn ghost sm" data-demo="admin@lawyerup.dev">Admin</button></div>
-    </div></div>`;
-  const f = $('#login');
-  f.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try { const { user } = await api('/auth/login', { method: 'POST', body: { email: f.email.value, password: f.password.value } }); afterAuth(user, params); }
-    catch (err) { fail(err); }
-  });
-  $$('[data-demo]').forEach((b) => b.addEventListener('click', () => { f.email.value = b.dataset.demo; f.password.value = 'Demo@1234'; f.requestSubmit(); }));
+      ${raw(p.footer)}
+      ${raw(isDemo() ? h`<div class="divider"></div><div class="demo-logins muted">Try it with a demo account:
+        ${p.demo.map(([email, label]) => raw(h`<button class="btn ghost sm" data-demo="${email}">${label}</button>`))}</div>` : '')}`);
+    const f = $('#login');
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const { user } = await api('/auth/login', { method: 'POST', body: { email: f.email.value, password: f.password.value, portal } });
+        afterAuth(user, params);
+      } catch (err) {
+        if (err.code === 'wrong_portal' && err.details?.href) {
+          toast(err.message, true);
+          return go(`${err.details.href}?email=${encodeURIComponent(f.email.value)}`);
+        }
+        fail(err);
+      }
+    });
+    if (params.get('email')) f.email.value = params.get('email'), f.password.focus();
+    $$('[data-demo]').forEach((b) => b.addEventListener('click', () => { f.email.value = b.dataset.demo; f.password.value = 'Demo@1234'; f.requestSubmit(); }));
+  };
 }
+const viewLogin = signInView('client');
+const viewLawyerLogin = signInView('lawyer');
+const viewAdminLogin = signInView('admin');
+const homeOf = (u) => (u.role === 'lawyer' ? '#/practice' : u.role === 'admin' ? '#/admin' : '#/find');
 
 const BAR_COUNCILS = ['Bar Council of Maharashtra & Goa', 'Bar Council of Delhi', 'Karnataka State Bar Council', 'Bar Council of Tamil Nadu & Puducherry',
   'Bar Council of Telangana', 'Bar Council of West Bengal', 'Bar Council of Gujarat', 'Bar Council of Uttar Pradesh', 'Other State Bar Council'];
 
+/** Client sign-up: Google or email, then a verified mobile number. */
 async function viewRegister({ params }) {
-  if (state.me) return go('#/');
-  const { places } = await api(`/places?city=${state.meta.defaultCity}`);
-  const role = params.get('role') === 'lawyer' ? 'lawyer' : 'client';
-  app.innerHTML = h`
-    <div class="auth" style="max-width:640px"><div class="card glass">
-      <h1>Create your account</h1>
-      ${raw(googleButton(params.get('next'), 'Sign up with Google', 'For clients. Advocates, use the form below to add your enrolment details.'))}
-      <div class="seg" id="role" style="margin:14px 0 18px"><button type="button" data-role="client" class="${role === 'client' ? 'on' : ''}">I need a lawyer</button><button type="button" data-role="lawyer" class="${role === 'lawyer' ? 'on' : ''}">I'm a lawyer</button></div>
-      <form id="reg" autocomplete="on">
-        <div class="field"><label>Full name</label><input name="name" required maxlength="120" autocomplete="name" placeholder="${role === 'lawyer' ? 'Adv. Firstname Lastname' : ''}" /></div>
-        <div class="row"><div class="field"><label>Email</label><input name="email" type="email" required autocomplete="email" /></div>
-          <div class="field"><label>Mobile number</label><input name="phone" inputmode="numeric" required placeholder="10-digit mobile" autocomplete="tel-national" /></div></div>
-        <div class="field"><label>Password</label><input name="password" type="password" required minlength="8" autocomplete="new-password" /><div class="hint">At least 8 characters, with a letter and a number.</div></div>
-        <div id="lawyer-fields" class="${role === 'lawyer' ? '' : 'hidden'}">
-          <div class="divider"></div><h3>Professional details</h3>
-          <p class="small muted">Your profile goes live after our team checks your enrolment with the Bar Council.</p>
-          <div class="row"><div class="field"><label>Bar Council</label><select name="barCouncil">${BAR_COUNCILS.map((b) => raw(h`<option>${b}</option>`))}</select></div>
-            <div class="field"><label>Enrolment number</label><input name="enrollmentNumber" placeholder="MAH/1234/2015" /></div></div>
-          <div class="row"><div class="field"><label>Year of enrolment</label><input name="enrollmentYear" type="number" min="1950" max="${new Date().getFullYear()}" /></div>
-            <div class="field"><label>Years of practice</label><input name="experienceYears" type="number" min="0" max="70" value="0" /></div></div>
-          <div class="row"><div class="field"><label>Consultation fee (₹)</label><input name="feeRupees" type="number" min="100" max="100000" value="1000" /></div>
-            <div class="field"><label>Session length</label><select name="sessionMinutes">${[15, 20, 30, 45, 60].map((m) => raw(`<option ${m === 30 ? 'selected' : ''} value="${m}">${m} min</option>`))}</select></div></div>
-          <div class="row"><div class="field"><label>Office area (Mumbai)</label><select name="area">${places.map((p) => raw(h`<option>${p.name}</option>`))}</select></div>
-            <div class="field"><label>Languages</label><input name="languages" value="English, Hindi" /><div class="hint">Comma separated</div></div></div>
-          <div class="field"><label>Practice areas (up to 6)</label><div class="chips">${state.meta.specializations.map((s) => raw(h`<label class="check chip"><input type="checkbox" name="spec" value="${s.slug}" /> ${s.name}</label>`))}</div></div>
-        </div>
-        <div class="divider"></div>
-        <div id="otp-step" class="hidden"><div class="field"><label>Verification code sent to your mobile</label><input name="otpCode" inputmode="numeric" maxlength="6" placeholder="6-digit code" /><div class="hint" id="otp-hint"></div></div></div>
-        <button class="btn block" id="reg-btn">Send verification code</button>
-        <p class="small muted" style="margin-top:10px">By continuing you agree to the Terms and Privacy Policy. We never ask for your Aadhaar number here.</p>
-      </form>
-      <p class="small">Already have an account? <a href="#/login">Sign in</a></p>
-    </div></div>`;
+  if (params.get('role') === 'lawyer') return go('#/lawyer/signup');
+  if (state.me) return go(homeOf(state.me));
+  app.innerHTML = authShell('client', h`
+    ${raw(googleButton(params.get('next'), 'Sign up with Google'))}
+    <form id="reg" autocomplete="on" style="margin-top:16px">
+      <div class="field"><label>Full name</label><input name="name" required maxlength="120" autocomplete="name" /></div>
+      <div class="field"><label>Email</label><input name="email" type="email" required autocomplete="email" /></div>
+      <div class="field"><label>Mobile number</label><input name="phone" inputmode="numeric" required placeholder="10-digit mobile" autocomplete="tel-national" /><div class="hint">Your lawyer uses this to reach you about the consultation.</div></div>
+      <div class="field"><label>Password</label><input name="password" type="password" required minlength="8" autocomplete="new-password" /><div class="hint">At least 8 characters, with a letter and a number.</div></div>
+      ${raw(otpBlock())}
+      <button class="btn block" id="reg-btn">Send verification code</button>
+      <p class="small muted" style="margin-top:10px">By continuing you agree to the <a href="#/terms">Terms</a> and <a href="#/privacy">Privacy Policy</a>.</p>
+    </form>
+    <p class="small">Already have an account? <a href="#/login">Sign in</a></p>
+    <p class="small muted">Are you an advocate? <a href="#/lawyer/signup">Join as a lawyer</a></p>`);
+  // The client page reuses the shell's title; give it sign-up wording.
+  $('.auth h1').textContent = 'Create your account'; $('.auth h1 + p').textContent = 'Find a lawyer, see the fee and book in minutes.';
+  wireSignup('client', params);
+}
 
-  let curRole = role; let otpSent = false;
-  $$('#role button').forEach((b) => b.addEventListener('click', () => {
-    curRole = b.dataset.role; $$('#role button').forEach((x) => x.classList.toggle('on', x === b));
-    $('#lawyer-fields').classList.toggle('hidden', curRole !== 'lawyer');
-  }));
+/** Lawyer sign-up: account details plus enrolment, fee and practice areas. */
+async function viewLawyerSignup({ params }) {
+  if (state.me) return go(homeOf(state.me));
+  const { places } = await api(`/places?city=${state.meta.defaultCity}`);
+  app.innerHTML = h`<div class="auth auth-lawyer" style="max-width:680px"><div class="card glass">
+    <p class="auth-kicker">LawyerUp for Lawyers</p>
+    <h1>Create your lawyer profile</h1>
+    <p class="muted" style="margin:-4px 0 18px">Your profile goes live after our team checks your enrolment with your State Bar Council.</p>
+    <form id="reg" autocomplete="on">
+      <h3>Your account</h3>
+      <div class="field"><label>Full name</label><input name="name" required maxlength="120" autocomplete="name" placeholder="Adv. Firstname Lastname" /></div>
+      <div class="row"><div class="field"><label>Work email</label><input name="email" type="email" required autocomplete="email" /></div>
+        <div class="field"><label>Mobile number</label><input name="phone" inputmode="numeric" required placeholder="10-digit mobile" autocomplete="tel-national" /></div></div>
+      <div class="field"><label>Password</label><input name="password" type="password" required minlength="8" autocomplete="new-password" /><div class="hint">At least 8 characters, with a letter and a number.</div></div>
+      <div class="divider"></div><h3>Enrolment</h3>
+      <div class="row"><div class="field"><label>Bar Council</label><select name="barCouncil">${BAR_COUNCILS.map((b) => raw(h`<option>${b}</option>`))}</select></div>
+        <div class="field"><label>Enrolment number</label><input name="enrollmentNumber" required placeholder="MAH/1234/2015" /></div></div>
+      <div class="row"><div class="field"><label>Year of enrolment</label><input name="enrollmentYear" type="number" min="1950" max="${new Date().getFullYear()}" /></div>
+        <div class="field"><label>Years of practice</label><input name="experienceYears" type="number" min="0" max="70" value="0" /></div></div>
+      <div class="divider"></div><h3>Your practice</h3>
+      <div class="row"><div class="field"><label>Consultation fee (₹)</label><input name="feeRupees" type="number" min="100" max="100000" value="1000" /></div>
+        <div class="field"><label>Session length</label><select name="sessionMinutes">${[15, 20, 30, 45, 60].map((m) => raw(`<option ${m === 30 ? 'selected' : ''} value="${m}">${m} min</option>`))}</select></div></div>
+      <div class="row"><div class="field"><label>Office area (Mumbai)</label><select name="area">${places.map((p) => raw(h`<option>${p.name}</option>`))}</select></div>
+        <div class="field"><label>Languages</label><input name="languages" value="English, Hindi" /><div class="hint">Separate with commas</div></div></div>
+      <div class="field"><label>Practice areas (up to 6)</label><div class="chips">${state.meta.specializations.map((s) => raw(h`<label class="check chip"><input type="checkbox" name="spec" value="${s.slug}" /> ${s.name}</label>`))}</div></div>
+      <div class="divider"></div>
+      ${raw(otpBlock())}
+      <button class="btn block" id="reg-btn">Send verification code</button>
+      <p class="small muted" style="margin-top:10px">By continuing you agree to the <a href="#/terms">Terms</a> and <a href="#/privacy">Privacy Policy</a>.</p>
+    </form>
+    <p class="small">Already on LawyerUp? <a href="#/lawyer/login">Sign in to your practice</a></p>
+    <p class="small muted">Looking for a lawyer instead? <a href="#/register">Create a client account</a></p>
+  </div></div>`;
+  wireSignup('lawyer', params);
+}
+
+const otpBlock = () => '<div id="otp-step" class="hidden"><div class="field"><label>Verification code sent to your mobile</label><input name="otpCode" inputmode="numeric" maxlength="6" placeholder="6-digit code" /><div class="hint" id="otp-hint"></div></div></div>';
+
+function wireSignup(role, params) {
+  let otpSent = false;
   const f = $('#reg');
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = $('#reg-btn'); btn.disabled = true;
     try {
+      if (role === 'lawyer' && !otpSent && $$('input[name=spec]:checked').length === 0) throw new Error('Choose at least one practice area.');
       if (!otpSent) {
         const r = await api('/auth/otp/request', { method: 'POST', body: { phone: f.phone.value } });
-        otpSent = true; $('#otp-step').classList.remove('hidden'); btn.textContent = 'Verify & create account';
-        if (r.devCode) { f.otpCode.value = r.devCode; $('#otp-hint').textContent = `Development mode: SMS isn't sent — your code is ${r.devCode} (also printed in the server log).`; }
+        otpSent = true; $('#otp-step').classList.remove('hidden'); btn.textContent = 'Verify and create account';
+        if (r.devCode) { f.otpCode.value = r.devCode; $('#otp-hint').textContent = `Demo mode: no SMS is sent. Your code is ${r.devCode}.`; }
         f.otpCode.focus(); return;
       }
-      const body = { role: curRole, name: f.name.value, email: f.email.value, phone: f.phone.value, password: f.password.value, otpCode: f.otpCode.value };
-      if (curRole === 'lawyer') Object.assign(body, {
+      const body = { role, name: f.name.value, email: f.email.value, phone: f.phone.value, password: f.password.value, otpCode: f.otpCode.value };
+      if (role === 'lawyer') Object.assign(body, {
         barCouncil: f.barCouncil.value, enrollmentNumber: f.enrollmentNumber.value, enrollmentYear: f.enrollmentYear.value || undefined,
         experienceYears: f.experienceYears.value, feeRupees: f.feeRupees.value, sessionMinutes: f.sessionMinutes.value, area: f.area.value,
-        languages: f.languages.value.split(',').map((s) => s.trim()).filter(Boolean), specializations: $$('input[name=spec]:checked').map((c) => c.value),
+        languages: f.languages.value.split(',').map((x) => x.trim()).filter(Boolean), specializations: $$('input[name=spec]:checked').map((c) => c.value),
       });
       const { user } = await api('/auth/register', { method: 'POST', body });
       afterAuth(user, params);
@@ -1621,7 +1695,7 @@ async function viewHome() {
     <section class="section" style="padding-top:0"><div class="wrap">
       <div class="band dark"><div><h2>Are you an advocate?</h2>
         <p style="font-size:17px;max-width:32em;margin:0">Set your fee, your hours and how you consult. Clients book and pay upfront, and you keep your full consultation fee.</p></div>
-        <div class="row" style="flex:0 0 auto"><a class="btn lg" href="#/register?role=lawyer">Create a lawyer profile</a><a class="btn lg ghost" href="#/for-lawyers">Learn more</a></div>
+        <div class="row" style="flex:0 0 auto"><a class="btn lg" href="#/lawyer/signup">Create a lawyer profile</a><a class="btn lg ghost" href="#/for-lawyers">Learn more</a></div>
       </div>
     </div></section>
 
@@ -1683,7 +1757,7 @@ function viewForLawyers() {
     <div class="wrap">
       <section class="page-hero" style="padding-top:140px"><h1 class="display">Practise on your own terms.</h1>
         <p class="lede">Reach clients in your city who are ready to book. You set the fee, the hours and how you consult. They pay before the session.</p>
-        <div class="row" style="max-width:460px;margin-top:8px"><a class="btn lg" href="#/register?role=lawyer">Create a lawyer profile</a><a class="btn lg ghost" href="#/login">Sign in</a></div></section>
+        <div class="row" style="max-width:460px;margin-top:8px"><a class="btn lg" href="#/lawyer/signup">Create a lawyer profile</a><a class="btn lg ghost" href="#/lawyer/login">Sign in</a></div></section>
       <section class="section" style="padding-top:20px"><div class="trust">
         <div>${raw(ICON.receipt)}<h3>Keep your full fee</h3><p>Clients pay a ${m.platformFeePercent}% service fee on top of your price. Your consultation fee is yours.</p></div>
         <div>${raw(ICON.clock)}<h3>Your calendar</h3><p>Publish weekly hours, block court days, and choose 15 to 60-minute sessions. Double bookings can't happen.</p></div>
@@ -1697,7 +1771,7 @@ function viewForLawyers() {
           ['Start taking bookings', 'Your profile appears in search. Manage consultations, hours and messages from your workspace.'],
         ]))}
       </section>
-      <div class="band dark" style="margin-bottom:40px"><div><h2>Join the first advocates in Mumbai</h2><p style="font-size:17px;margin:0">It takes about five minutes to set up.</p></div><a class="btn lg" href="#/register?role=lawyer">Create a lawyer profile</a></div>
+      <div class="band dark" style="margin-bottom:40px"><div><h2>Join the first advocates in Mumbai</h2><p style="font-size:17px;margin:0">It takes about five minutes to set up.</p></div><a class="btn lg" href="#/lawyer/signup">Create a lawyer profile</a></div>
     </div>`;
 }
 
@@ -1735,7 +1809,7 @@ const MARKETING = new Set(['/', '/how-it-works', '/for-lawyers', '/about', '/hel
 const routes = [
   [/^\/$/, viewHome], [/^\/find$/, viewSearch], [/^\/how-it-works$/, viewHow], [/^\/for-lawyers$/, viewForLawyers],
   [/^\/about$/, viewAbout], [/^\/help$/, viewHelp], [/^\/privacy$/, viewPrivacy], [/^\/terms$/, viewTerms], [/^\/compare$/, viewCompare], [/^\/lawyers\/[\w-]+$/, viewLawyer], [/^\/checkout\/[\w-]+$/, viewCheckout],
-  [/^\/bookings$/, viewBookings], [/^\/bookings\/[\w-]+$/, viewBooking], [/^\/login$/, viewLogin], [/^\/complete-profile$/, viewCompleteProfile], [/^\/register$/, viewRegister],
+  [/^\/bookings$/, viewBookings], [/^\/bookings\/[\w-]+$/, viewBooking], [/^\/login$/, viewLogin], [/^\/lawyer\/login$/, viewLawyerLogin], [/^\/lawyer\/signup$/, viewLawyerSignup], [/^\/admin\/login$/, viewAdminLogin], [/^\/complete-profile$/, viewCompleteProfile], [/^\/register$/, viewRegister],
   [/^\/workspace$/, () => go('#/practice')], [/^\/admin$/, viewAdmin],
   [/^\/practice$/, viewPractice], [/^\/practice\/schedule$/, viewSchedule], [/^\/practice\/appointments$/, viewAppointments],
   [/^\/practice\/clients$/, viewClients], [/^\/practice\/clients\/[\w-]+$/, viewClient], [/^\/practice\/messages$/, viewInbox],
@@ -1756,7 +1830,7 @@ async function render() {
   const view = routes.find(([re]) => re.test(route.path))?.[1];
   if (!view) { app.innerHTML = '<div class="empty">Page not found. <a href="#/">Go home</a></div>'; return; }
   try { await view(route); } catch (e) {
-    if (e.status === 401) { state.me = null; return go(`#/login?next=${encodeURIComponent(location.hash)}`); }
+    if (e.status === 401) { state.me = null; return go(`${loginFor(portalOfPath(route.path))}?next=${encodeURIComponent(location.hash)}`); }
     app.innerHTML = h`<div class="empty">${e.message}</div>`;
   }
   window.scrollTo(0, 0);

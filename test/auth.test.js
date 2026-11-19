@@ -119,3 +119,32 @@ test('clients must complete identity verification before booking (no ID data is 
   assert.match(u.kyc_reference, /^sbx_/);
   assert.ok(!JSON.stringify(u).includes('123412341234'));
 });
+
+test('each audience signs in on its own page', async () => {
+  const pw = 'Demo@1234';
+  const post = (body) => request(app).post('/api/auth/login').send(body);
+
+  // Right page: signed in.
+  assert.equal((await post({ email: 'client@lawyerup.dev', password: pw, portal: 'client' })).status, 200);
+  assert.equal((await post({ email: 'lawyer@lawyerup.dev', password: pw, portal: 'lawyer' })).status, 200);
+  assert.equal((await post({ email: 'admin@lawyerup.dev', password: pw, portal: 'admin' })).status, 200);
+
+  // Wrong page: no session, and the answer points at the right page.
+  const lawyerOnClient = await post({ email: 'lawyer@lawyerup.dev', password: pw, portal: 'client' });
+  assert.equal(lawyerOnClient.status, 403);
+  assert.equal(lawyerOnClient.body.error.code, 'wrong_portal');
+  assert.equal(lawyerOnClient.body.error.details.href, '#/lawyer/login');
+  assert.equal(lawyerOnClient.headers['set-cookie'], undefined);
+  const clientOnAdmin = await post({ email: 'client@lawyerup.dev', password: pw, portal: 'admin' });
+  assert.equal(clientOnAdmin.body.error.details.href, '#/login');
+
+  // A wrong password never reveals which page the account belongs to.
+  const guess = await post({ email: 'admin@lawyerup.dev', password: 'nope', portal: 'client' });
+  assert.equal(guess.status, 401);
+  assert.equal(guess.body.error.code, 'unauthorized');
+
+  // Unknown page names are rejected; admins still can't sign up.
+  assert.equal((await post({ email: 'client@lawyerup.dev', password: pw, portal: 'root' })).status, 400);
+  const adminSignup = await request(app).post('/api/auth/register').send({ role: 'admin', name: 'X', email: 'x@y.com', phone: '9000000001', password: 'Secret123' });
+  assert.equal(adminSignup.status, 400);
+});
