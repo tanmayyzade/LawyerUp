@@ -1,4 +1,5 @@
-# Render Blueprint — deploys LawyerUp as a public demo (free web service + free PostgreSQL).
+# Render Blueprint — deploys LawyerUp as a public demo (free web service; database on Neon).
+# lawyerup-db below is the old Render database, kept only until the move to Neon is confirmed.
 # Dashboard → New → Blueprint → pick this repository.
 databases:
   - name: lawyerup-db
@@ -21,10 +22,9 @@ services:
         value: production
       - key: NODE_VERSION
         value: "22"
+      # Neon PostgreSQL (free, doesn't expire). Paste the Neon connection string in the Render dashboard.
       - key: DATABASE_URL
-        fromDatabase:
-          name: lawyerup-db
-          property: connectionString
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: DEMO_MODE
