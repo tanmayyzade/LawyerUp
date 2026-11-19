@@ -67,7 +67,14 @@ export function createApp() {
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found.', 'not_found')));
 
   // Frontend (single-page app)
-  app.use(express.static(publicDir, { extensions: ['html'], maxAge: config.isProd ? '1h' : 0 }));
+  // HTML/JS/CSS revalidate on every load (cheap 304s via ETag) so a deploy reaches visitors immediately;
+  // images and fonts can be cached for a day.
+  app.use(express.static(publicDir, {
+    extensions: ['html'],
+    setHeaders: (res, file) => {
+      res.setHeader('Cache-Control', /\.(html|js|css)$/.test(file) ? 'no-cache' : 'public, max-age=86400');
+    },
+  }));
   app.get('*', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
 
   // Errors
